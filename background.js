@@ -1,18 +1,35 @@
 // The Cortex: Manages the global state of the Nullifier Protocol.
 
-// Set initial state on first install
+// Set initial state and perform cleanup on first install/update
 chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.local.get(['isEnabled', 'whitelist'], (result) => {
-        const defaults = {};
+        const toStore = {};
+        let needsUpdate = false;
+
+        // Set default state if not present
         if (result.isEnabled === undefined) {
-            defaults.isEnabled = true;
+            toStore.isEnabled = true;
+            needsUpdate = true;
         }
-        if (result.whitelist === undefined) {
-            defaults.whitelist = '';
+
+        // Validate and clean up existing whitelist
+        const domainRegex = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9](?:\.[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9])*$/;
+        const whitelistStr = result.whitelist || '';
+        const domains = whitelistStr.split('\n').map(d => d.trim());
+        const validDomains = domains.filter(domain => domainRegex.test(domain) || domain === '');
+
+        const cleanedWhitelist = validDomains.join('\n');
+
+        // Only update storage if the whitelist has changed or is being initialized
+        if (result.whitelist === undefined || cleanedWhitelist !== whitelistStr) {
+            toStore.whitelist = cleanedWhitelist;
+            needsUpdate = true;
         }
-        if (Object.keys(defaults).length > 0) {
-            chrome.storage.local.set(defaults);
+
+        if (needsUpdate) {
+            chrome.storage.local.set(toStore);
         }
+
         // Set icon based on stored or default state
         updateIcon(result.isEnabled !== false);
     });
