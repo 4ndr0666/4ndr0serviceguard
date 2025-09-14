@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "4ndr0serviceguard",
   "version": "1.0.0",
-  "description": "Asserts absolute operator control over Service Worker registration across all domains.",
+  "description": "Disables Service Worker registrations to provide greater control over browser behavior. Requires access to all URLs to be effective.",
   "permissions": [
     "storage"
   ],
