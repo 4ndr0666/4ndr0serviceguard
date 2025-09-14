@@ -3,14 +3,19 @@
 // Set initial state on first install
 chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.local.get(['isEnabled', 'whitelist'], (result) => {
+        const defaults = {};
         if (result.isEnabled === undefined) {
-            chrome.storage.local.set({ isEnabled: true });
+            defaults.isEnabled = true;
         }
         if (result.whitelist === undefined) {
-            chrome.storage.local.set({ whitelist: '' });
+            defaults.whitelist = '';
         }
+        if (Object.keys(defaults).length > 0) {
+            chrome.storage.local.set(defaults);
+        }
+        // Set icon based on stored or default state
+        updateIcon(result.isEnabled !== false);
     });
-    updateIcon(true);
 });
 
 // Function to update the icon based on the enabled state
