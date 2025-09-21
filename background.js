@@ -41,33 +41,38 @@ chrome.storage.onChanged.addListener((changes, namespace) => {
     }
 });
 
-// ## RT-ENHANCEMENT: Main injection logic moved to background script ##
-// This uses the chrome.scripting API to bypass CSP restrictions on inline scripts.
+// The Infiltrator content script runs on all pages at document_start, disabling
+// service workers immediately. The logic below is responsible for *restoring*
+// service worker functionality on whitelisted domains.
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-    // Inject as early as possible
+    // Not all updates have a URL.
+    if (!tab.url || !tab.url.startsWith('http')) {
+        return;
+    }
+
+    // Restore on 'loading' to minimize the time SWs are disabled on whitelisted sites.
     if (changeInfo.status === 'loading') {
         chrome.storage.local.get(['isEnabled', 'whitelist'], (result) => {
             if (chrome.runtime.lastError || result.isEnabled === false) {
-                return; // Storage error or disabled
+                return; // Storage error or disabled, so SWs remain disabled.
             }
 
-            const url = tab.url;
-            if (!url || !url.startsWith('http')) {
-                return; // Ignore non-web pages
-            }
-            
-            const hostname = new URL(url).hostname;
+            const hostname = new URL(tab.url).hostname;
             const whitelist = (result.whitelist || '').split('\n').map(d => d.trim()).filter(Boolean);
 
             if (isWhitelisted(hostname, whitelist)) {
-                return; // Domain is whitelisted, do not inject.
+                // This domain is whitelisted. Inject the restorer.
+                chrome.scripting.executeScript({
+                    target: { tabId: tabId, allFrames: true },
+                    world: 'MAIN', // Execute in the page's own context
+                    func: restoreServiceWorkers,
+                }).catch(err => {
+                    // This can happen if the tab is closed or the context is invalidated.
+                    if (!err.message.includes('Cannot access a chrome:// URL')) {
+                        console.warn(`Could not inject restorer into ${hostname}:`, err);
+                    }
+                });
             }
-
-            chrome.scripting.executeScript({
-                target: { tabId: tabId, allFrames: true },
-                world: 'MAIN', // Execute in the page's own context
-                func: pacifyServiceWorkers,
-            });
         });
     }
 });
@@ -81,39 +86,28 @@ function isWhitelisted(hostname, whitelist) {
     });
 }
 
-// This function will be serialized and injected into the target page.
-// It has no access to the extension's scope.
-function pacifyServiceWorkers() {
-    if (navigator.serviceWorker) {
-        const logPrefix = '[Nullifier]';
+// This function is injected into whitelisted pages to restore the original
+// Service Worker functionality that was preserved by the Infiltrator.
+function restoreServiceWorkers() {
+    if (window.__SW_ORIGINALS__) {
         const swContainer = navigator.serviceWorker.constructor.prototype;
-
-        // Use defineProperties to make the override more robust and less detectable.
         Object.defineProperties(swContainer, {
             register: {
-                value: function(scriptURL, options) {
-                    console.log(logPrefix, 'BLOCKED Service Worker registration:', scriptURL, 'Options:', options);
-                    return Promise.reject(new DOMException('Service Worker registration disabled by Nullifier Protocol.', 'SecurityError'));
-                },
+                value: window.__SW_ORIGINALS__.register,
                 writable: true,
                 configurable: true
             },
             getRegistration: {
-                value: function() {
-                    console.log(logPrefix, 'BLOCKED Service Worker getRegistration call.');
-                    return Promise.resolve(undefined);
-                },
+                value: window.__SW_ORIGINALS__.getRegistration,
                 writable: true,
                 configurable: true
             },
             getRegistrations: {
-                value: function() {
-                    console.log(logPrefix, 'BLOCKED Service Worker getRegistrations call.');
-                    return Promise.resolve([]);
-                },
+                value: window.__SW_ORIGINALS__.getRegistrations,
                 writable: true,
                 configurable: true
             }
         });
+        delete window.__SW_ORIGINALS__; // Clean up the window object
     }
 }
