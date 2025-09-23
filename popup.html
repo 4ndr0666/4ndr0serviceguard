@@ -7,13 +7,14 @@
 <body>
     <div class="row">
         <strong>Nullifier Protocol</strong>
-        <label class="switch">
+        <!--// Add ARIA attributes for accessibility compliance.-->
+        <label class="switch" role="switch" aria-checked="false">
             <input type="checkbox" id="masterSwitch">
             <span class="slider"></span>
         </label>
     </div>
     <label for="whitelist">Whitelist (one domain per line):</label>
-    <textarea id="whitelist"></textarea>
+    <textarea id="whitelist" placeholder="example.com&#10;another-site.org"></textarea>
     <div id="validationMessage" style="font-size: 11px; color: #FF6B6B; margin-top: 5px;"></div>
     <script src="popup.js"></script>
 </body>
