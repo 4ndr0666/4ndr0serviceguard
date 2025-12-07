@@ -1,5 +1,5 @@
-// 4ndr0serviceguard Background – Optimized v1.2.0
-// Nullifier Protocol: Whitelist-triggered restore + global deny
+// 4ndr0serviceguard Background – Ghost Protocol v2.0.0
+// Whitelist-triggered restore + global deny
 
 let whitelistCache = new Map(); // domain -> true
 let cacheExpiry = 0; // ms
@@ -46,39 +46,23 @@ async function logBlock(domain) {
   await chrome.storage.local.set({ swBlocks: blockLog });
 }
 
-// CSP injection rule (toggleable via popup – for post-load hammer)
-async function injectCSP(tabId, enabled) {
-  if (!enabled) return;
-  const rule = {
-    target: { tabId },
-    func: () => {
-      const meta = document.createElement('meta');
-      meta.httpEquiv = 'Content-Security-Policy';
-      meta.content = "worker-src 'none'; child-src 'none'";
-      document.head.appendChild(meta);
-    }
-  };
-  await chrome.scripting.executeScript(rule);
-}
-
 // Debounced restore on whitelist match
 const debouncedRestore = debounce(async (tabId, url) => {
   if (await isWhitelisted(url)) {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['pacifier.js']
+      files: ['pacifier_v2.js']
     });
-    await injectCSP(tabId, true); // CSP hammer on whitelist too (optional)
   }
 }, DEBOUNCE_MS);
 
 // Listen for tab updates (navigation)
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.url && tab.status === 'complete') {
+  if (changeInfo.url && tab.status === 'loading') { // Fire earlier on 'loading'
     const url = changeInfo.url;
     if (!(await isWhitelisted(url))) {
       logBlock(new URL(url).hostname);
-      // Pacifier already injected globally at document_start – no action needed
+      // Pacifier injected globally at document_start by manifest.json
     } else {
       debouncedRestore(tabId, url);
     }
@@ -108,3 +92,4 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   return false;
 });
+

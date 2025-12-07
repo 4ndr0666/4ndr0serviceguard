@@ -4,7 +4,7 @@
 </p>
 
 
-[![version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/4ndr0666/4ndr0serviceguard)  
+[![version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/4ndr0666/4ndr0serviceguard)  
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A dual-purpose Chrome Extension:**  
@@ -27,9 +27,9 @@ For power users, developers, and security professionals, controlling this layer 
 
 ---
 
-## The Solution: The Nullifier Protocol
+## The Solution: The Ghost Protocol
 
-`4ndr0serviceguard` enforces a **default-deny Service Worker policy**, blocking all registrations globally unless explicitly allowed.  
+`4ndr0serviceguard` enforces a **default-deny Service Worker policy**, blocking all registrations globally unless explicitly allowed. The Ghost Protocol is a significant upgrade from the previous Nullifier Protocol, providing a much stealthier and more robust method of nullification.
 
 - Everyday users get faster, cleaner, and more private browsing.  
 - Operators can surgically dismantle Service Worker protections, revealing hidden endpoints, bypassing client-side validation, and triggering legacy fallbacks.  
@@ -40,9 +40,9 @@ This model delivers predictability, privacy, and expanded attack surface visibil
 
 ## Features
 
-- 🛡️ **Nullifier Protocol**: Global kill switch for Service Workers.  
+- 🛡️ **Ghost Protocol**: Global kill switch for Service Workers using a stealthy proxy-based approach.
 - ✍️ **Intelligent Whitelist**: Add trusted domains and their subdomains (e.g., `google.com` covers `docs.google.com`).  
-- 🤫 **Stealth API Nullification**: Returns fake registration promises to avoid breakage or detection.  
+- 🤫 **Stealth API Nullification**: Returns dynamic, convincing fake objects to avoid breakage or detection.
 - ⚡ **Instant Execution**: Injected at `document_start` before page scripts.  
 - ✅ **Live Validation**: Input checked in real time via popup.  
 - ✨ **Manifest V3**: Modern, asynchronous, and secure codebase.  
@@ -56,11 +56,11 @@ Additional operator-level traits:
 
 ## How It Works
 
-### Stage 1: Pacification
-`pacifier.js` injects into the **MAIN world** at `document_start`. It overwrites `navigator.serviceWorker` methods with inert stubs. All registration attempts resolve successfully but no Service Worker is active.
+### Stage 1: Ghosting
+`pacifier_v2.js` injects into the **MAIN world** at `document_start`. It overwrites `navigator.serviceWorker` with a proxy that intercepts all property access and method calls. All registration attempts are intercepted and return a convincing, dynamically generated fake `ServiceWorkerRegistration` object.
 
 ### Stage 2: Restoration
-`background.js` checks tab URLs against the whitelist. For trusted domains, it reinjects original API methods with `chrome.scripting.executeScript`, restoring Service Worker functionality.
+`background.js` checks tab URLs against the whitelist. For trusted domains, it reinjects the original `navigator.serviceWorker` object, restoring full Service Worker functionality.
 
 ---
 
@@ -102,7 +102,7 @@ git clone https://github.com/4ndr0666/4ndr0serviceguard.git
 
 Click the icon to open control popup:
 
-* **Nullifier Protocol Switch**: Master on/off toggle.
+* **Ghost Protocol Switch**: Master on/off toggle.
 * **Whitelist Textarea**: Add domains (one per line). Subdomains included automatically. Reload pages after edits.
 
 ---
@@ -118,8 +118,8 @@ Click the icon to open control popup:
 ## Mechanism of Action (MoA)
 
 1. **MAIN World Injection**: Same privilege as site scripts.
-2. **API Monkey-Patching**: Save and overwrite original `navigator.serviceWorker` methods.
-3. **Deceptive Resolution**: Return fake `ServiceWorkerRegistration` objects to avoid detection.
+2. **API Proxying**: Overwrites `navigator.serviceWorker` with a proxy object that intercepts all interactions.
+3. **Dynamic Mocking**: Returns dynamically generated fake objects that are more convincing than static stubs.
 4. **Surgical Restoration**: Reinstate originals on whitelisted domains.
 
 ---
