@@ -1,21 +1,31 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>4ndr0serviceguard</title>
-    <link rel="stylesheet" type="text/css" href="popup.css">
+  <meta charset="UTF-8">
+  <style>
+    body { width: 300px; padding: 10px; font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; }
+    button { width: 100%; padding: 8px; margin: 5px 0; background: #333; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #555; }
+    input { width: 100%; padding: 8px; margin: 5px 0; background: #222; color: #fff; border: 1px solid #444; border-radius: 4px; }
+    #log-panel { display: none; max-height: 200px; overflow-y: auto; background: #111; padding: 10px; border-radius: 4px; margin-top: 10px; }
+    #log-list { list-style: none; padding: 0; }
+    #log-list li { padding: 2px 0; border-bottom: 1px solid #333; font-size: 12px; }
+    .status { text-align: center; padding: 5px; font-weight: bold; }
+    .enabled { color: #0f0; }
+    .disabled { color: #f00; }
+  </style>
 </head>
 <body>
-    <div class="row">
-        <strong>Nullifier Protocol</strong>
-        <!--// Add ARIA attributes for accessibility compliance.-->
-        <label class="switch" role="switch" aria-checked="false">
-            <input type="checkbox" id="masterSwitch">
-            <span class="slider"></span>
-        </label>
-    </div>
-    <label for="whitelist">Whitelist (one domain per line):</label>
-    <textarea id="whitelist" placeholder="example.com&#10;another-site.org"></textarea>
-    <div id="validationMessage" style="font-size: 11px; color: #FF6B6B; margin-top: 5px;"></div>
-    <script src="popup.js"></script>
+  <h3>4ndr0serviceguard</h3>
+  <button id="toggle-btn">Toggle Guard</button>
+  <div id="status" class="status">Loading...</div>
+  <input id="domain-input" placeholder="Add domain to whitelist">
+  <button id="add-whitelist">Add Whitelist</button>
+  <button id="toggle-log">Show Block Logs</button>
+  <div id="log-panel">
+    <h4>Recent Blocks</h4>
+    <ul id="log-list"></ul>
+  </div>
+  <script src="popup.js"></script>
 </body>
 </html>
