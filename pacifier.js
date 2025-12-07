@@ -1,45 +1,68 @@
-// The Pacifier: Runs in the MAIN world to neutralize Service Workers.
-// This script executes before other page scripts thanks to "run_at": "document_start".
+// 4ndr0serviceguard Pacifier – Dummy SW Layer v1.2.0
+// Injected at document_start in MAIN world – owns navigator.serviceWorker
 
-// Preserve original methods for potential restoration by the background script.
-if (navigator.serviceWorker && !window.__SW_ORIGINALS__) {
-    window.__SW_ORIGINALS__ = {
-        register: navigator.serviceWorker.constructor.prototype.register,
-        getRegistration: navigator.serviceWorker.constructor.prototype.getRegistration,
-        getRegistrations: navigator.serviceWorker.constructor.prototype.getRegistrations,
-    };
-}
+// Singleton lock
+if (window._4ndr0serviceguardActive) return;
+window._4ndr0serviceguardActive = true;
 
-// The Nullifier Protocol
-if (navigator.serviceWorker) {
-    const logPrefix = '[4ndr0serviceguard]';
-    const swContainer = navigator.serviceWorker.constructor.prototype;
+// Fake ServiceWorker objects
+const FakeRegistration = class {
+  constructor() {
+    this.scope = '/';
+    this.scriptURL = '/sw.js';
+    this.installing = null;
+    this.waiting = null;
+    this.active = null;
+  }
+  update() { return Promise.resolve(); }
+  unregister() { return Promise.resolve(true); }
+  ready = Promise.resolve();
+};
 
-    Object.defineProperties(swContainer, {
-        register: {
-            value: function(scriptURL, options) {
-                console.log(logPrefix, 'PACIFIED Service Worker registration (stealth-mode): ', scriptURL);
-                // Deceive the caller by returning a resolved promise with a fake registration.
-                return Promise.resolve({ scope: options?.scope || '/' });
-            },
-            writable: true,
-            configurable: true
-        },
-        getRegistration: {
-            value: function() {
-                console.log(logPrefix, 'BLOCKED Service Worker getRegistration call.');
-                return Promise.resolve(undefined);
-            },
-            writable: true,
-            configurable: true
-        },
-        getRegistrations: {
-            value: function() {
-                console.log(logPrefix, 'BLOCKED Service Worker getRegistrations call.');
-                return Promise.resolve([]);
-            },
-            writable: true,
-            configurable: true
-        }
-    });
+const FakeWorker = class {
+  constructor() { this.state = 'redundant'; }
+  postMessage() { /* noop */ }
+  terminate() { /* noop */ }
+};
+
+const FakeController = class {
+  constructor() { this.scriptURL = '/sw.js'; }
+};
+
+// Jittered register (5% random fail + variable delay for realism)
+const originalRegister = navigator.serviceWorker.register;
+navigator.serviceWorker.register = (scriptURL, options) => {
+  return new Promise((resolve, reject) => {
+    const delay = 50 + Math.random() * 100; // 50-150ms mimic real load
+    setTimeout(() => {
+      if (Math.random() < 0.05) {
+        reject(new Error('SW registration failed silently')); // Random fail for evasion tests
+      } else {
+        const fakeReg = new FakeRegistration();
+        resolve(fakeReg);
+      }
+    }, delay);
+  });
+};
+
+// Stub other APIs
+navigator.serviceWorker.controller = null;
+navigator.serviceWorker.getRegistrations = () => Promise.resolve([]);
+navigator.serviceWorker.ready = Promise.resolve();
+navigator.serviceWorker.oncontrollerchange = null;
+
+// Block addEventListener on SW events
+const originalAddEventListener = EventTarget.prototype.addEventListener;
+EventTarget.prototype.addEventListener = function(type, listener, options) {
+  if (type.startsWith('controller') || type === 'message') {
+    return; // Silent noop
+  }
+  return originalAddEventListener.call(this, type, listener, options);
+};
+
+// Log block (send to background)
+if (location.protocol !== 'chrome:' && location.hostname !== 'localhost') {
+  navigator.serviceWorker.addEventListener('error', (e) => {
+    chrome.runtime.sendMessage({ type: 'blockLog', domain: location.hostname });
+  });
 }
