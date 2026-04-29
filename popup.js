@@ -1,4 +1,6 @@
-// 4ndr0serviceguard Popup v1.2.0
+// 4ndr0serviceguard Popup Controller – Ghost Protocol Synthesis v4.0
+// Handles real-time telemetry extraction and matrix configuration
+
 document.addEventListener('DOMContentLoaded', () => {
   const toggleBtn = document.getElementById('toggle-btn');
   const statusDiv = document.getElementById('status');
@@ -8,45 +10,95 @@ document.addEventListener('DOMContentLoaded', () => {
   const logPanel = document.getElementById('log-panel');
   const logList = document.getElementById('log-list');
 
-  // Toggle guard
-  toggleBtn.onclick = () => {
-    chrome.storage.sync.get(['enabled'], (result) => {
-      const enabled = !result.enabled;
-      chrome.storage.sync.set({ enabled });
-      updateStatus(enabled);
-    });
-  };
+  // Initialize toggle state from secure storage
+  chrome.storage.sync.get(['enabled'], (result) => {
+    const isEnabled = result.enabled !== false; // Default to true
+    toggleBtn.checked = isEnabled;
+    updateStatus(isEnabled);
+  });
 
-  // Add whitelist
+  // Toggle Global Guard Status
+  toggleBtn.addEventListener('change', (e) => {
+    const enabled = e.target.checked;
+    chrome.runtime.sendMessage({ action: 'toggle', enabled }, (response) => {
+      if (response && response.status === 'toggled') {
+        updateStatus(response.state);
+      }
+    });
+  });
+
+  // Inject Whitelist Rules
   addBtn.onclick = () => {
     const domain = domainInput.value.trim();
     if (domain) {
-      chrome.runtime.sendMessage({ action: 'addWhitelist', domain });
-      domainInput.value = '';
+      chrome.runtime.sendMessage({ action: 'addWhitelist', domain }, (res) => {
+        if (res && res.status === 'added') {
+          domainInput.value = '';
+          domainInput.placeholder = 'MATRIX UPDATED';
+          setTimeout(() => domainInput.placeholder = 'Target domain to whitelist...', 2000);
+        } else if (res && res.status === 'exists') {
+          domainInput.value = '';
+          domainInput.placeholder = 'ALREADY WHITELISTED';
+          setTimeout(() => domainInput.placeholder = 'Target domain to whitelist...', 2000);
+        }
+      });
     }
   };
 
-  // Toggle logs
+  // Extract and Display Telemetry
   logBtn.onclick = () => {
     logPanel.style.display = logPanel.style.display === 'none' ? 'block' : 'none';
     if (logPanel.style.display === 'block') loadLogs();
   };
 
   async function loadLogs() {
-    const response = await chrome.runtime.sendMessage({ action: 'getLogs' });
-    logList.innerHTML = Object.entries(response.logs).map(([domain, count]) => 
-      `<li>${domain}: ${count} blocked</li>`
-    ).join('') || '<li>No blocks logged</li>';
+    chrome.runtime.sendMessage({ action: 'getLogs' }, (response) => {
+      if (!response) return;
+      logList.innerHTML = '';
+      
+      // Render Global Block Metrics
+      const blockHeader = document.createElement('li');
+      blockHeader.className = 'section-header';
+      blockHeader.innerHTML = '<strong>[ GLOBAL BLOCK METRICS ]</strong>';
+      logList.appendChild(blockHeader);
+      
+      const blockEntries = Object.entries(response.logs || {});
+      if (blockEntries.length === 0) {
+        logList.innerHTML += '<li>No navigation blocks recorded.</li>';
+      } else {
+        blockEntries.forEach(([domain, count]) => {
+          logList.innerHTML += `<li>${domain} <span class="count">[${count}]</span></li>`;
+        });
+      }
+
+      // Render Deep SW/WS Interception Telemetry
+      const attemptHeader = document.createElement('li');
+      attemptHeader.className = 'section-header';
+      attemptHeader.innerHTML = '<strong>[ INTERCEPTION TELEMETRY ]</strong>';
+      logList.appendChild(attemptHeader);
+
+      if (response.attempts && response.attempts.length > 0) {
+        // Render the 15 most recent interceptions
+        const recent = response.attempts.slice(-15).reverse();
+        recent.forEach(att => {
+          const time = new Date(att.timestamp).toLocaleTimeString();
+          logList.innerHTML += `
+            <li>
+              <span class="telemetry-time">[${time}]</span> 
+              <span class="telemetry-origin">[${att.context}]</span>
+              <span class="telemetry-target">-> ${att.scriptURL}</span>
+            </li>`;
+        });
+      } else {
+        logList.innerHTML += '<li>No advanced telemetry recorded.</li>';
+      }
+    });
   }
 
-  // Update status
+  // UI State Updater
   function updateStatus(enabled) {
-    statusDiv.textContent = enabled ? 'Guard Active' : 'Guard Inactive';
-    statusDiv.className = `status ${enabled ? 'enabled' : 'disabled'}`;
+    statusDiv.textContent = enabled ? 'GUARD ACTIVE' : 'GUARD INACTIVE';
+    statusDiv.style.color = enabled ? '#15FFFF' : '#ff3333';
   }
-
-  // Init
-  chrome.storage.sync.get(['enabled'], (result) => {
-    updateStatus(result.enabled !== false); // Default on
-  });
 });
+

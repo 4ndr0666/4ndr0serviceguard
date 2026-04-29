@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Gatekeeper Authorization</title>
+  <link rel="stylesheet" href="prompt.css">
+</head>
+<body>
+  <div class="alert-box">
+    <div class="header">
+      <span class="warning">⚠️ CONNECTION INTERCEPTED</span>
+    </div>
+    <div class="content">
+      <p>A process is attempting to establish a background connection.</p>
+      <div class="data-row">
+        <span class="label">Type:</span>
+        <span id="conn-type" class="value">Analyzing...</span>
+      </div>
+      <div class="data-row">
+        <span class="label">Target:</span>
+        <span id="conn-url" class="value url-value">Analyzing...</span>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="btn-deny" class="btn btn-deny">DENY (SPOOF)</button>
+      <button id="btn-allow" class="btn btn-allow">AUTHORIZE</button>
+    </div>
+  </div>
+  <script src="prompt.js"></script>
+</body>
+</html>
