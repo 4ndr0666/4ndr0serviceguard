@@ -1,43 +1,68 @@
+:root {
+  --bg-dark-base: #050A0F;
+  --bg-glass-panel: rgba(10, 19, 26, 0.35);
+  --accent-cyan: #00E5FF;
+  --text-cyan-active: #67E8F9;
+  --accent-cyan-border-idle: rgba(0, 229, 255, 0.25);
+  --accent-cyan-border-hover: rgba(0, 229, 255, 0.6);
+  --accent-cyan-bg-active: rgba(0, 229, 255, 0.15);
+  --glow-cyan-active: rgba(0, 229, 255, 0.45);
+  --edge-light-top: rgba(255, 255, 255, 0.12);
+  --edge-light-left: rgba(255, 255, 255, 0.12);
+  --text-primary: #EAEAEA;
+  --text-secondary: #9E9E9E;
+  --font-body: 'Roboto Mono', monospace;
+}
+
 body {
-  font-family: 'Courier New', Courier, monospace;
-  background-color: #050505;
-  color: #e0e0e0;
   margin: 0;
-  padding: 15px;
+  padding: 10px;
+  background: var(--bg-dark-base);
+  color: var(--text-primary);
+  font-family: var(--font-body);
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   height: 100vh;
   box-sizing: border-box;
 }
 
-.alert-box {
-  border: 1px solid #ff3333;
-  background-color: #111;
+.glass-panel {
+  background: var(--bg-glass-panel);
+  border: 1px solid var(--accent-cyan-border-idle);
+  border-top: 1px solid var(--edge-light-top);
+  border-left: 1px solid var(--edge-light-left);
+  border-radius: 8px;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  padding: 18px;
   width: 100%;
-  padding: 15px;
-  box-shadow: 0 0 15px rgba(255, 51, 51, 0.2);
+  max-width: 360px;
 }
 
-.header {
-  border-bottom: 1px solid #ff3333;
-  padding-bottom: 10px;
-  margin-bottom: 15px;
-  text-align: center;
+.hud-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--accent-cyan-border-idle);
 }
 
-.warning {
-  color: #ff3333;
-  font-weight: bold;
+.glyph-container { width: 38px; height: 38px; }
+
+.header-text .title {
+  font-family: 'Cinzel Decorative', serif;
   font-size: 16px;
+  color: var(--accent-cyan);
   letter-spacing: 1px;
 }
 
-.content p {
-  font-size: 12px;
-  color: #aaa;
-  margin-top: 0;
-  margin-bottom: 15px;
+.header-text .subtitle {
+  font-size: 10px;
+  color: var(--text-secondary);
+  letter-spacing: 1.5px;
 }
 
 .data-row {
@@ -46,59 +71,54 @@ body {
 }
 
 .label {
-  color: #15FFFF;
-  font-weight: bold;
+  color: var(--text-secondary);
   display: inline-block;
-  width: 60px;
+  width: 58px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 .value {
-  color: #fff;
+  color: var(--text-primary);
   word-break: break-all;
 }
 
-.url-value {
-  color: #ff9900;
-  font-style: italic;
-}
+.url-value { color: #ffaa00; }
 
 .actions {
-  margin-top: 20px;
   display: flex;
-  justify-content: space-between;
+  gap: 10px;
+  margin-top: 18px;
 }
 
-.btn {
-  font-family: inherit;
-  font-weight: bold;
-  font-size: 13px;
-  padding: 8px 0;
-  width: 48%;
+/* HUD Buttons from spec */
+.hud-button {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 0;
+  border: 1px solid transparent;
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background-color: rgba(0, 0, 0, 0.35);
   cursor: pointer;
-  border: none;
-  transition: all 0.2s;
+  transition: all 300ms ease-in-out;
 }
 
-.btn-deny {
-  background-color: #330000;
-  color: #ff3333;
-  border: 1px solid #ff3333;
+.hud-button:hover {
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan-border-hover);
+  background-color: var(--accent-cyan-bg-hover);
 }
 
-.btn-deny:hover {
-  background-color: #ff3333;
-  color: #000;
-  box-shadow: 0 0 10px rgba(255, 51, 51, 0.5);
-}
-
-.btn-allow {
-  background-color: #003333;
-  color: #15FFFF;
-  border: 1px solid #15FFFF;
-}
-
-.btn-allow:hover {
-  background-color: #15FFFF;
-  color: #000;
-  box-shadow: 0 0 10px rgba(21, 255, 255, 0.5);
+.hud-button.active {
+  color: var(--text-cyan-active);
+  background-color: var(--accent-cyan-bg-active);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 15px var(--glow-cyan-active);
 }

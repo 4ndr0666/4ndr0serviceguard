@@ -2,30 +2,72 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>4ndr0guard Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4NDR0666 ServiceGuard</title>
   <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="header">
-    <span id="status" class="status enabled">GUARD ACTIVE</span>
-    <label class="switch">
-      <input type="checkbox" id="toggle-btn" checked>
-      <span class="slider"></span>
-    </label>
-  </div>
-  
-  <div class="row">
-    <input type="text" id="domain-input" placeholder="Target domain to whitelist...">
-    <button id="add-whitelist">INJECT</button>
-  </div>
-  
-  <div class="row log-controls">
-    <button id="toggle-log">EXTRACT TELEMETRY</button>
-  </div>
-  
-  <div id="log-panel" style="display: none;">
-    <ul id="log-list">
-      </ul>
+  <div class="glass-panel main-popup">
+    <!-- Header -->
+    <div class="hud-header">
+      <div class="glyph-container">
+        <!-- Injected from 4ndr0666_glyph.txt -->
+        <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="var(--accent-cyan)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path class="glyph-ring-1" d="M 64,12 A 52,52 0 1 1 63.9,12 Z" stroke-dasharray="21.78 21.78" stroke-width="2"/>
+          <path class="glyph-ring-2" d="M 64,20 A 44,44 0 1 1 63.9,20 Z" stroke-dasharray="10 10" stroke-width="1.5" opacity="0.7"/>
+          <path class="glyph-hex" d="M64 30 L91.3 47 L91.3 81 L64 98 L36.7 81 L36.7 47 Z"/>
+          <text x="64" y="67" text-anchor="middle" dominant-baseline="middle" fill="var(--accent-cyan)" stroke="none" font-size="56" font-weight="700" font-family="'Cinzel Decorative', serif">Ψ</text>
+        </svg>
+      </div>
+      <div class="header-text">
+        <div class="title">4NDR0666</div>
+        <div class="subtitle">SERVICE GUARD v2</div>
+      </div>
+    </div>
+
+    <!-- Master Toggle -->
+    <div class="section">
+      <div class="section-label">GHOST PROTOCOL</div>
+      <div class="toggle-row">
+        <label class="switch">
+          <input type="checkbox" id="masterToggle">
+          <span class="slider"></span>
+        </label>
+        <span id="toggleLabel" class="toggle-label">ACTIVE — DEFAULT DENY</span>
+      </div>
+    </div>
+
+    <!-- Live Blocked Attempts -->
+    <div class="section">
+      <div class="section-label">CURRENT PAGE — BLOCKED</div>
+      <div id="blockedList" class="blocked-list glass-subpanel">
+        <!-- Populated dynamically by popup.js -->
+        <div class="empty-state">No registration attempts yet</div>
+      </div>
+      <div class="action-row">
+        <button class="hud-button" id="refreshBlocked">REFRESH</button>
+        <button class="hud-button" id="allowAllCurrent">ALLOW ALL THIS ORIGIN</button>
+      </div>
+    </div>
+
+    <!-- Whitelist -->
+    <div class="section">
+      <div class="section-label">WHITELIST (ONE PER LINE)</div>
+      <textarea id="whitelistInput" class="glass-textarea" placeholder="example.com&#10;app.example.com" spellcheck="false"></textarea>
+      <div class="action-row">
+        <button class="hud-button" id="saveWhitelist">SAVE &amp; APPLY</button>
+        <button class="hud-button" id="clearWhitelist">CLEAR</button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="status-text" id="statusText">Ready</div>
+      <button class="hud-button small" id="openTriMode">OPEN IN TRI-MODE</button>
+    </div>
   </div>
 
   <script src="popup.js"></script>

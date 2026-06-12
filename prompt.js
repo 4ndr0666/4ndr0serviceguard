@@ -1,4 +1,4 @@
-// 4ndr0serviceguard UI Controller – Gatekeeper Prompt v5.0
+// 4ndr0serviceguard UI Controller – Gatekeeper Prompt v6 (Electric-Glass)
 
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-allow').addEventListener('click', () => resolve(true));
   document.getElementById('btn-deny').addEventListener('click', () => resolve(false));
 
-  // Default to DENY if the window is closed without interaction
   window.addEventListener('beforeunload', () => {
     resolve(false);
   });

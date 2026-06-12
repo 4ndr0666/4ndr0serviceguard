@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "4ndr0serviceguard",
   "short_name": "4ndr0guard",
-  "version": "5.0.0",
-  "description": "Ghost Protocol: Interactive Service Worker and WebSocket Firewall Gatekeeper.",
+  "version": "6.0.0",
+  "description": "Ghost Protocol v6: Interactive Service Worker & WebSocket Firewall with Live Approval UI.",
   "permissions": [
     "storage",
     "scripting",
@@ -21,7 +21,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["pacifier_v5.js"],
+      "js": ["ghost_core_v6.js"],
       "run_at": "document_start",
       "all_frames": true,
       "world": "MAIN"
@@ -30,8 +30,8 @@
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/disabled16.png",
-      "48": "icons/disabled48.png"
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png"
     }
   },
   "icons": {

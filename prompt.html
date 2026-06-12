@@ -4,28 +4,44 @@
   <meta charset="UTF-8">
   <title>Gatekeeper Authorization</title>
   <link rel="stylesheet" href="prompt.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="alert-box">
-    <div class="header">
-      <span class="warning">⚠️ CONNECTION INTERCEPTED</span>
+  <div class="glass-panel alert-box">
+    <div class="hud-header">
+      <div class="glyph-container">
+        <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="var(--accent-cyan)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <path class="glyph-ring-1" d="M 64,12 A 52,52 0 1 1 63.9,12 Z" stroke-dasharray="21.78 21.78" stroke-width="2"/>
+          <path class="glyph-ring-2" d="M 64,20 A 44,44 0 1 1 63.9,20 Z" stroke-dasharray="10 10" stroke-width="1.5" opacity="0.7"/>
+          <path class="glyph-hex" d="M64 30 L91.3 47 L91.3 81 L64 98 L36.7 81 L36.7 47 Z"/>
+          <text x="64" y="67" text-anchor="middle" dominant-baseline="middle" fill="var(--accent-cyan)" stroke="none" font-size="42" font-weight="700" font-family="'Cinzel Decorative', serif">Ψ</text>
+        </svg>
+      </div>
+      <div class="header-text">
+        <div class="title">GATEKEEPER</div>
+        <div class="subtitle">AUTHORIZATION REQUIRED</div>
+      </div>
     </div>
+
     <div class="content">
-      <p>A process is attempting to establish a background connection.</p>
       <div class="data-row">
-        <span class="label">Type:</span>
-        <span id="conn-type" class="value">Analyzing...</span>
+        <span class="label">TYPE</span>
+        <span id="conn-type" class="value">UNKNOWN</span>
       </div>
       <div class="data-row">
-        <span class="label">Target:</span>
-        <span id="conn-url" class="value url-value">Analyzing...</span>
+        <span class="label">TARGET</span>
+        <span id="conn-url" class="value url-value">UNKNOWN</span>
       </div>
     </div>
+
     <div class="actions">
-      <button id="btn-deny" class="btn btn-deny">DENY (SPOOF)</button>
-      <button id="btn-allow" class="btn btn-allow">AUTHORIZE</button>
+      <button id="btn-deny" class="hud-button">DENY (SPOOF)</button>
+      <button id="btn-allow" class="hud-button active">AUTHORIZE</button>
     </div>
   </div>
+
   <script src="prompt.js"></script>
 </body>
 </html>
