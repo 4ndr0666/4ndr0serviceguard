@@ -1,7 +1,7 @@
 # 4ndr0serviceguard
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/4ndr0666/4ndr0serviceguard/refs/heads/main/icons/4ndr0serviceguard.svg" alt="4ndr0serviceguard Project Banner" width="50%">
+  <img src="https://raw.githubusercontent.com/4ndr0666/4ndr0serviceguard/refs/heads/main/icons/4ndr0serviceguard.svg" alt="4ndr0serviceguard Project Banner" width="100%">
 </p>
 
 [![version](https://img.shields.io/badge/version-7.1.1-blue.svg)](https://github.com/4ndr0666/4ndr0serviceguard)
