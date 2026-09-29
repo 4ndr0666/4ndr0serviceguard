@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/4ndr0666/4ndr0serviceguard/refs/heads/main/icons/4ndr0serviceguard.svg" alt="4ndr0serviceguard Project Banner" width="100%">
 </p>
 
-[![version](https://img.shields.io/badge/version-7.2.0-blue.svg)](https://github.com/4ndr0666/4ndr0serviceguard)
+[![version](https://img.shields.io/badge/version-7.3.0-blue.svg)](https://github.com/4ndr0666/4ndr0serviceguard)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A dual-purpose Chrome Extension:**
@@ -29,7 +29,7 @@ For power users, developers, and security professionals, having control over thi
 
 ## The Solution: The Ghost Protocol
 
-`4ndr0serviceguard` enforces a **default-deny Service Worker policy**. All registration attempts are intercepted and nullified unless the domain is explicitly whitelisted — and pre-existing registrations (plus their CacheStorage) are purged on load. A **blacklist** complements the whitelist: blacklisted domains are denied absolutely — before the master toggle, before the whitelist, even in pass-through mode.
+`4ndr0serviceguard` enforces a **default-deny Service Worker policy**. All registration attempts are intercepted and nullified unless the domain is explicitly whitelisted — and pre-existing registrations (plus their CacheStorage) are purged on load. A **blacklist** complements the whitelist: blacklisted domains are denied absolutely — before the master toggle, before the whitelist, even in pass-through mode. Since **v7.3.0** a **spooflist** joins them: spooflisted domains are silently pacified — every socket opens, behaves, and never transmits — with no prompt, ever.
 
 The **Ghost Protocol** (`ghost_core_v7.js`) is a stealthy, Proxy-based interception system that replaces `navigator.serviceWorker` with a controlled interface. It returns dynamically generated, convincing fake `ServiceWorkerRegistration` objects when blocking, so `toString()` checks, property identity, and instance checks all stay native-looking.
 
@@ -41,15 +41,20 @@ The **Ghost Protocol** (`ghost_core_v7.js`) is a stealthy, Proxy-based intercept
 ## Features
 
 ### Core Features
-- 🛡️ **Ghost Protocol v7.2**: Stealthy Proxy-based Service Worker nullification (`toString()`-transparent hooks)
+- 🛡️ **Ghost Protocol v7.3**: Stealthy Proxy-based Service Worker nullification (`toString()`-transparent hooks)
 - 🧹 **Purge-on-Load**: unregisters pre-existing Service Workers and clears CacheStorage on protected origins
 - ✍️ **Enforced Whitelist**: domain + automatic subdomain support — whitelisted origins get real Service Workers, no prompts
-- ⛔ **Absolute Blacklist**: explicit-prohibition list — hard-denied before the master toggle, the whitelist and the DDoS-Guard fast path; survives pass-through mode; mutually exclusive with the whitelist on single-domain adds
+- ⛔ **Absolute Blacklist**: explicit-prohibition list — hard-denied before the master toggle, the spooflist, the whitelist and the DDoS-Guard fast path; survives pass-through mode; mutually exclusive with the other lists on single-domain adds
+- 👻 **Silent Spooflist**: auto-spoof list — sites you want spoofed by default never prompt; every socket is pacified (stays "open", swallows sends, honors close)
+- ⚡ **Three-Way Action Model**: every decision is AUTHORIZE (real) / SPOOF (pacify) / DENY (native-faithful failure) — at the gate, in the prompt, in the Quick Bar, in the popup and in the userscript
+- 🎯 **In-Page Quick Bar**: the default decision surface — a 3lectric-Glass bar in the page (no focus-stealing OS window): one click or one key (A/S/D, Enter, Esc), remembered-scope selector (connection / site / endpoint), 30 s auto-deny countdown; the prompt window remains available as fallback and explicit preference
+- 🖥️ **Current-Site Quick Actions**: the toolbar popup's CURRENT SITE panel settles authorize/spoof/block/ask-again for the active site in one click, with live policy badges
 - 🤫 **Dynamic API Mocking**: identity-stable fake objects minimize breakage and detection
 - ⚡ **Instant Execution**: injected at `document_start` in the MAIN world (plus an ISOLATED-world bootstrap bridge)
 - ✅ **Live Validation & Approval UI**: 3lectric-Glass popup with real-time blocked-attempt monitoring
-- 🔄 **One-Click Approval / Prohibition**: allow or permanently blacklist individual attempts or whole origins directly from the popup and the Gatekeeper prompt
+- 🔄 **One-Click Decisions**: allow, spoof or permanently block individual attempts or whole origins from the popup, the Quick Bar and the Gatekeeper prompt
 - 🎚️ **Functional Master Toggle**: default-deny ↔ pass-through, reflected in the toolbar icon
+- 🌉 **Userscript Policy Bridge**: the helper userscript's menu/HUD site rules route to the extension's CONFIRM bar on governed pages — one policy store, no more split-brain blacklists
 - ✨ **Manifest V3**: modern, asynchronous architecture with restart-safe state
 
 ### Operator Enhancements (v6–v7.2)
@@ -62,7 +67,7 @@ The **Ghost Protocol** (`ghost_core_v7.js`) is a stealthy, Proxy-based intercept
 - **Violentmonkey Companion**: Service-Worker-focused userscript version (`ghost_core_v7.user.js`)
 - **Completed Helper Userscript**: full standalone Ghost Protocol for userscript managers (`userscript/4ndr0tools - 4ndr0serviceguarder.user.js`) — blacklist + whitelist, master toggle, purge-on-load, stealth Proxy hooks, glass status HUD with the Ψ glyph, and automatic deferral to the extension's Gatekeeper when the extension is present
 
-See [MITIGATION_LOG.md](MITIGATION_LOG.md) for the full v7.0 → v7.1 → v7.1.1 → v7.2.0 gap-closure record (v7.2.0: blacklist enforcement, helper-userscript completion, 3lectric-Glass spec alignment, unified version bump).
+See [MITIGATION_LOG.md](MITIGATION_LOG.md) for the full v7.0 → v7.1 → v7.1.1 → v7.2.0 → v7.3.0 gap-closure record (v7.3.0: quick-decision surface, spooflist, three-way action model, policy bridge, matching fixes).
 
 ---
 
@@ -87,16 +92,19 @@ MAIN-world scripts cannot use `chrome.*` APIs, so the extension runs two content
 - Gatekept via the same permission system.
 
 ### Background Controller (`background.js`)
-- Unified router: internal extension pages (`onMessage`) + the Ghost Core (`onMessageExternal`, action-restricted and rate-limited).
-- Enforcement order per gate request: rate limit → **blacklist hard-deny** → master toggle → DDoS-Guard → whitelist → interactive prompt.
-- Prompt lifecycle is fully managed (dedup, per-tab caps, close-to-deny, restart-safe request IDs); the prompt can blacklist the prompted domain while denying.
-- Maintains whitelist and blacklist in `chrome.storage.sync`; telemetry in `chrome.storage.local` with serialized writes.
+- Unified router: internal extension contexts (`onMessage` — popup, prompt window, ghost_bridge Quick Bar) + the Ghost Core (`onMessageExternal`, action-restricted and rate-limited).
+- Enforcement order per gate request: rate limit → **blacklist hard-deny** → **spooflist auto-spoof** → master toggle → DDoS-Guard → whitelist → interactive decision (Quick Bar first, prompt window fallback).
+- Every gate response carries an ACTION (`allow` / `spoof` / `deny`) alongside the v7.2 `allowed` boolean — fully backward compatible.
+- Decision lifecycle is fully managed (query-stripped dedup, per-tab caps, close-to-deny, restart-safe request IDs, ack-based surface fallback, cross-surface dismissal); the Quick Bar and the prompt can both settle AND record a remembered site rule.
+- Maintains whitelist, spooflist and blacklist in `chrome.storage.sync` (mutually exclusive on single adds); telemetry in `chrome.storage.local` with serialized writes.
+- Domain normalization accepts bare domains, URLs with schemes/paths/ports, and boundary-dot noise — pasted URLs finally match.
 
 ### Popup UI
 - 3lectric-Glass paradigm (4NDR0666OS UI/UX spec): Matrix Deep Base glass levels, Electric Cyan accents, JetBrains Mono / Orbitron typography, 150ms transitions, rectangular brutalist buttons, destructive-action (#ff0055) surfaces, 0-radius cyan scrollbars, and the Ψ branding glyph.
-- Master Ghost Protocol toggle (icon follows state).
-- Live blocked attempts list with per-item approval (ALLOW) and prohibition (BLOCK).
-- Whitelist and blacklist management (one domain per line each).
+- **CURRENT SITE panel**: live origin + policy badges (AUTHORIZED / SPOOFED / BLOCKED / ASKING) and one-click AUTHORIZE / SPOOF / BLOCK / ASK AGAIN.
+- Master Ghost Protocol toggle (icon follows state); decision-surface preference (inline Quick Bar vs prompt window).
+- Live blocked attempts list with per-item ALLOW, SPOOF and BLOCK buttons.
+- Whitelist, spooflist and blacklist management (one domain per line each).
 - Direct "Send to tri-mode" integration.
 
 ---
@@ -134,26 +142,29 @@ Requires Chrome 111+ (`"world": "MAIN"` support).
 
 1. Click the extension icon to open the control popup.
 2. Toggle **Ghost Protocol** (default: enabled = default-deny). The toolbar icon follows the state.
-3. Add trusted domains to the whitelist (one per line). Subdomains are matched automatically.
-4. Add domains that must never connect to the blacklist (one per line). Blacklist entries are denied absolutely — even with the Ghost Protocol toggled off.
+3. Use the **CURRENT SITE** panel for one-click site rules: AUTHORIZE (whitelist), SPOOF (spooflist — never asks, silent pacifier), BLOCK (blacklist — absolute prohibition) or ASK AGAIN (remove all rules for the site).
+4. Or manage the lists as text (one per line): the whitelist grants real connections; the spooflist auto-spoofs silently; the blacklist hard-denies absolutely — even with the Ghost Protocol toggled off. Pasted URLs are normalized (scheme/path/port stripped) automatically.
 5. Reload target tabs after making changes.
-6. When a page attempts a Service Worker / WebSocket / SharedWorker connection, the Gatekeeper prompt appears: **AUTHORIZE** (one-shot allow), **DENY (SPOOF)**, or **BLACKLIST DOMAIN** (deny + permanent prohibition).
-7. The popup's live list offers per-attempt ALLOW and BLOCK buttons plus whole-origin approval.
+6. When a page attempts a Service Worker / WebSocket / SharedWorker connection that no list covers, the decision surface appears — by default the **in-page Quick Bar**: AUTHORIZE (A) / SPOOF (S) / DENY (D), a remembered-scope selector (this connection / this site / this endpoint), Enter = authorize, Esc = deny, and a 30 s auto-deny countdown. Prefer OS windows? Switch the decision surface to **PROMPT WINDOW** in the popup — the same three actions plus ALWAYS-variants, site-scoped.
+7. The popup's live list offers per-attempt ALLOW / SPOOF / BLOCK buttons plus whole-origin approval.
+
+**Which action when?** AUTHORIZE for endpoints you trust and need (live data, working push). SPOOF for sites that merely *want* a socket — the page sees a healthy open connection, nothing is ever transmitted, no retries, no nagging, no fallbacks to noisier channels. DENY for a native-faithful handshake failure (sites that must *react* to a dead socket).
 
 For quick personal use, the Violentmonkey companion script (`ghost_core_v7.user.js`) is also available — it enforces Service-Worker blocking with purge + cache clearing and uses `@exclude` lines as its whitelist.
 
-The completed helper userscript (`userscript/4ndr0tools - 4ndr0serviceguarder.user.js`) is the full standalone Ghost Protocol for Tampermonkey/Violentmonkey: same default-deny doctrine with local whitelist + blacklist + master toggle, purge-on-load, stealth Proxy hooks, a 3lectric-Glass status HUD (menu command: **Show status HUD (Ψ)**), and bounded deny notifications (off by default, stealth doctrine). When the extension is present on a page, the helper stands down to utility mode so the extension's Gatekeeper runs exactly once — no double gating, in either injection order.
+The completed helper userscript (`userscript/4ndr0tools - 4ndr0serviceguarder.user.js`) is the full standalone Ghost Protocol for Tampermonkey/Violentmonkey: same default-deny doctrine and three-way action model with local whitelist + spooflist + blacklist + master toggle, purge-on-load, stealth Proxy hooks, pacified and denied WS phantoms, a 3lectric-Glass status HUD (menu command: **Show status HUD (Ψ)**), and bounded deny notifications (off by default, stealth doctrine). When the extension is present on a page, the helper stands down to utility mode so the extension's Gatekeeper runs exactly once — no double gating, in either injection order — **and its menu/HUD site rules route to the extension's CONFIRM bar** (the policy bridge), so blacklisting or spoof-listing a site from the userscript menu actually reaches the extension's lists.
 
 ---
 
 ## Tactical Notes
 
 - The extension applies default-deny immediately upon injection.
-- Use the whitelist surgically during engagements; use the blacklist for hosts that must never open workers or sockets (trackers, telemetry sinks, hostile CDNs).
-- The blacklist is absolute: it precedes the master toggle, the DDoS-Guard fast path and the whitelist, and survives pass-through mode. Single-domain adds keep the two lists mutually exclusive; after independent bulk edits a domain on both lists always resolves to deny.
+- Use the whitelist surgically during engagements; use the spooflist for sites you want quietly pacified ("spoof by default" — zero prompts, zero breakage); use the blacklist for hosts that must never open workers or sockets (trackers, telemetry sinks, hostile CDNs).
+- The blacklist and spooflist are absolute: they precede the master toggle, the DDoS-Guard fast path and the whitelist, and survive pass-through mode. Single-domain adds keep the three lists mutually exclusive; after independent bulk edits the gate resolves in order — blacklist beats spooflist beats whitelist.
+- The Quick Bar settles over the internal channel in a closed shadow root with `isTrusted`-gated handlers — the page cannot press AUTHORIZE for itself, and page-spammed policy requests are capped, throttled and auto-ignored.
 - The popup shows live blocked attempts for rapid decision-making.
 - The tri-mode integration pipes the current page and blocked-attempt data through the URL hash and the clipboard.
-- The `externally_connectable` surface is restricted to three actions (`ghostStatus`, `requestPermission`, `swAttemptLog`), rate-limited per tab; page scripts cannot forge an allow — or a blacklist entry — every allow and every prohibition still requires your consent or an explicit list entry.
+- The `externally_connectable` surface is restricted to three actions (`ghostStatus`, `requestPermission`, `swAttemptLog`), rate-limited per tab; page scripts cannot forge an allow, a spoof grant, a prohibition or a settlement — every decision still requires your consent or an explicit list entry.
 
 ---
 
@@ -177,6 +188,7 @@ No build step required. Edit `ghost_core_v7.js`, `popup.js`, or `background.js` 
 
 ## Version History (Relevant)
 
+- **v7.3.0** — Quick-decision cycle (field report: "blacklisting does not stop the persistent popup on sites I want to spoof by default"): three-way action model (AUTHORIZE / SPOOF / DENY), silent spooflist, in-page Quick Bar (keyboard + countdown + remembered scopes) with the prompt window as fallback, site-scoped remember grants (the endpoint-host grant-scope defect), robust domain normalization (pasted URLs match), query-stripped dedup, popup CURRENT SITE panel + per-attempt SPOOF, decision-surface preference, and the userscript↔extension policy bridge (split-brain fix) (see [MITIGATION_LOG.md](MITIGATION_LOG.md))
 - **v7.2.0** — Blacklist enforcement (absolute-prohibition gate step, mutual-exclusion list management, prompt/popup blacklist controls), completed helper userscript (stealth dual-layer hooks, WS phantom, SharedWorker gate, purge, local lists, 3lectric-Glass HUD, extension deferral), 3lectric-Glass spec alignment across popup/prompt, constructor-fidelity hardening, unified 7.2.0 version bump across every component (see [MITIGATION_LOG.md](MITIGATION_LOG.md))
 - **v7.1.0** — Gap-mitigation release: purge-on-load + cache clearing, enforced whitelist, functional master toggle, working popup/background IPC, restart-safe telemetry, Proxy camouflage, live WebSocket property forwarding, userscript companion, LICENSE, 50-item gap closure (see [MITIGATION_LOG.md](MITIGATION_LOG.md))
 - **v7.0.0** — Prototype-level hooking and CSP violation handling

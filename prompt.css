@@ -1,10 +1,10 @@
-/* prompt.css — 4ndr0serviceguard Gatekeeper Prompt v7.2.0
+/* prompt.css — 4ndr0serviceguard Gatekeeper Prompt v7.3.0
    3lectric-Glass paradigm (4NDR0666OS UI/UX specification) translated to web
    CSS: Matrix Deep Base rgba(10,19,26) at spec glass levels, Electric Cyan
-   #00E5FF, Secondary #67E8F9, Destructive #ff0055 (the BLACKLIST control),
-   JetBrains Mono system font, Orbitron display title, Cinzel Decorative for
-   the Ψ glyph only, 150ms ease-in-out transitions, rectangular brutalist
-   buttons (radius 0), 4px glass panel geometry. */
+   #00E5FF, Secondary #67E8F9, Destructive #ff0055 (the DENY / BLACKLIST
+   controls), JetBrains Mono system font, Orbitron display title, Cinzel
+   Decorative for the Ψ glyph only, 150ms ease-in-out transitions, rectangular
+   brutalist buttons (radius 0), 4px glass panel geometry. */
 
 :root {
   /* Base palette (spec 2.1) */
@@ -120,11 +120,30 @@ body {
 /* Action surfaces */
 .actions {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   margin-top: 14px;
 }
 
 .actions.secondary { margin-top: 8px; }
+
+/* v7.3.0: compact secondary row (three site-grant buttons) */
+.actions.secondary .hud-button {
+  padding: 8px 0;
+  font-size: 0.65rem;
+  letter-spacing: 0.03em;
+}
+
+/* v7.3.0: keyboard/action legend under the button matrix */
+.hint-row {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-cyan-faint);
+  font-size: 9px;
+  line-height: 1.6;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  text-align: center;
+}
 
 /* Standard control surfaces (spec 4.4) */
 .hud-button {

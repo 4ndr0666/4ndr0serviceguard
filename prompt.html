@@ -31,8 +31,8 @@
         <span id="conn-type" class="value">UNKNOWN</span>
       </div>
       <div class="data-row">
-        <span class="label">DOMAIN</span>
-        <span id="conn-domain" class="value">UNKNOWN</span>
+        <span class="label">SITE</span>
+        <span id="conn-site" class="value">UNKNOWN</span>
       </div>
       <div class="data-row">
         <span class="label">TARGET</span>
@@ -41,12 +41,20 @@
     </div>
 
     <div class="actions">
-      <button id="btn-deny" class="hud-button">DENY (SPOOF)</button>
-      <button id="btn-allow" class="hud-button active">AUTHORIZE</button>
+      <!-- v7.3.0 three-way action model -->
+      <button id="btn-allow" class="hud-button active">AUTHORIZE ·A</button>
+      <button id="btn-spoof" class="hud-button">SPOOF ·S</button>
+      <button id="btn-deny" class="hud-button destructive">DENY ·D</button>
     </div>
     <div class="actions secondary">
-      <!-- v7.2.0: deny this attempt AND permanently blacklist the domain -->
-      <button id="btn-blacklist" class="hud-button destructive">BLACKLIST DOMAIN</button>
+      <!-- v7.3.0 remembered site grants — page-origin scoped so one grant
+           covers every endpoint and Service Worker on the site -->
+      <button id="btn-allow-site" class="hud-button">ALWAYS AUTHORIZE SITE</button>
+      <button id="btn-spoof-site" class="hud-button">ALWAYS SPOOF SITE</button>
+      <button id="btn-blacklist" class="hud-button destructive">BLACKLIST SITE</button>
+    </div>
+    <div class="hint-row">
+      ENTER authorize · ESC deny · SPOOF = silent live socket · DENY = native failure
     </div>
   </div>
 

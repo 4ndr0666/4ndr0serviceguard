@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         4ndr0serviceguard — Ghost Core Companion
 // @namespace    https://github.com/4ndr0666/4ndr0serviceguard
-// @version      7.2.0
-// @description  Stealth Service Worker firewall for userscript managers. Rejects new registrations by returning realistic fake registration objects, unregisters pre-existing Service Workers and clears CacheStorage. Techniques per https://www.bugbugnow.net/2020/03/Reject-to-register-a-ServiceWorker.html. Use the @exclude lines below as your whitelist.
+// @version      7.3.0
+// @description  Stealth Service Worker firewall for userscript managers. Rejects new registrations by returning realistic fake registration objects, unregisters pre-existing Service Workers and clears CacheStorage. Techniques per https://www.bugbugnow.net/2020/03/Reject-to-register-a-ServiceWorker.html. Use the @exclude lines below as your whitelist. (v7.3.0: aligned with the extension's three-way action model — the full authorize/spoof/deny gate lives in the extension and the helper userscript.)
 // @author       4ndr0666
 // @license      MIT
 // @run-at       document-start
@@ -17,7 +17,12 @@
 // Whitelist operation: add @exclude lines above for every site that must keep
 // real Service Worker functionality (the bugbugnow.net @exclude pattern).
 // Scope note: this companion enforces Service Workers only. The extension
-// build additionally gates WebSockets/SharedWorkers through its approval UI.
+// build additionally gates WebSockets/SharedWorkers through its approval UI,
+// and since v7.3.0 settles every decision with one of three actions:
+// AUTHORIZE (real), SPOOF (pacified live-looking socket) or DENY
+// (native-faithful failure). This SW-only companion keeps its minimal
+// deny-with-fake-registration doctrine, which is the Service Worker form of
+// both SPOOF and DENY.
 
 ;(function (win) {
   'use strict';

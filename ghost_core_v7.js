@@ -1,4 +1,4 @@
-// ghost_core_v7.js — 4ndr0serviceguard Ghost Core v7.2 (MAIN world)
+// ghost_core_v7.js — 4ndr0serviceguard Ghost Core v7.3 (MAIN world)
 //
 // Paradigm (D1): Proxy-based interception facade — single paradigm, no chimera.
 //   navigator.serviceWorker                       → memoized phantom container
@@ -23,6 +23,17 @@
 //   the page origin is blacklisted; a blacklisted origin stays guarded even
 //   when the master toggle is off or the origin is whitelisted (the blacklist
 //   is an absolute prohibition — the background gate enforces the same order).
+// v7.3.0: three-way action model. The gate now answers with an ACTION, not a
+//   boolean: 'allow' (real connection), 'spoof' (pacify — the phantom socket
+//   transitions CONNECTING→OPEN at the 40 ms cadence, fires a synthetic open,
+//   then swallows every send() silently and honors close(): the page believes
+//   it has a live socket and never nags or retries) or 'deny' (v7.2 behavior,
+//   preserved verbatim: native-faithful error+close handshake failure at the
+//   40 ms cadence). Service Workers pacify through the fake registration for
+//   both 'spoof' and 'deny' (a fake registration IS the Service Worker
+//   pacifier); SharedWorkers keep the baseline SecurityError for both.
+//   ghostStatus additionally reports the spooflisted flag so a spooflisted
+//   origin stays guarded (and purged) exactly like a blacklisted one.
 
 (function () {
   'use strict';
@@ -46,7 +57,8 @@
 
   const noise = () => Math.random() < 0.12;
   const origin = window.location.origin;
-  const GATE_TIMEOUT_MS = 120000; // last-resort auto-deny if the prompt never settles
+  const GATE_TIMEOUT_MS = 120000; // last-resort auto-deny if the decision never settles
+  const GATE_SPOOF_OPEN_MS = 40;  // v7.3.0: pacified sockets "open" at the v7 cadence
 
   function resolveExtId() {
     if (extRuntime && extRuntime.id) return extRuntime.id;
@@ -85,20 +97,27 @@
     });
   }
 
+  // v7.3.0: the gatekeeper answers with an action. The v7.2 boolean shape is
+  // still honored (allowed:true → 'allow', anything else → 'deny'), and a
+  // dead channel or an unsettled decision fails safe to 'deny'.
   function interrogateGatekeeper(type, targetUrl) {
     let timer = null;
     const timeoutP = new Promise((resolve) => {
-      timer = setTimeout(() => resolve(false), GATE_TIMEOUT_MS);
+      timer = setTimeout(() => resolve('deny'), GATE_TIMEOUT_MS);
     });
     const askP = extSend({
       action: 'requestPermission',
       type: type,
       url: String(targetUrl || ''),
       pageOrigin: origin
-    }).then((response) => !!(response && response.allowed));
-    return Promise.race([askP, timeoutP]).then((allowed) => {
+    }).then((response) => {
+      if (!response || typeof response !== 'object') return 'deny';
+      if (response.action === 'spoof') return 'spoof';
+      return response.allowed === true ? 'allow' : 'deny';
+    });
+    return Promise.race([askP, timeoutP]).then((action) => {
       if (timer) clearTimeout(timer);
-      return allowed;
+      return action;
     });
   }
 
@@ -243,7 +262,7 @@
 
   const defaultFakeRegistration = () => createFakeRegistration(origin + '/service-worker-fake.js');
 
-  // === GHOST STATUS (master toggle + whitelist enforcement, fail-safe active) ===
+  // === GHOST STATUS (master toggle + list enforcement, fail-safe active) ===
   let ghostActiveForOrigin = true;
   let sharedAllowed = false;
 
@@ -283,7 +302,11 @@
       // v7.2.0: blacklist is absolute — a blacklisted origin stays guarded
       // even when the master toggle is off or the origin is whitelisted.
       const blacklisted = status.blacklisted === true;
-      ghostActiveForOrigin = (enabled && !whitelisted) || blacklisted;
+      // v7.3.0: spooflist is an equally explicit user decision — a spooflisted
+      // origin stays guarded (workers purged, sockets pacified) even when the
+      // master toggle is off or the origin is whitelisted.
+      const spooflisted = status.spooflisted === true;
+      ghostActiveForOrigin = (enabled && !whitelisted) || blacklisted || spooflisted;
       if (ghostActiveForOrigin) purgeExistingWorkers();
     });
   }
@@ -297,12 +320,18 @@
       // Pass-through: master toggle off or origin whitelisted.
       return originalRegisterFn.call(thisArg === fakeContainer ? realSW : thisArg, scriptURL, options);
     }
-    const allowed = await interrogateGatekeeper('Service Worker', scriptURL);
-    if (allowed && originalRegisterFn) {
+    const action = await interrogateGatekeeper('Service Worker', scriptURL);
+    if (action === 'allow' && originalRegisterFn) {
       emitBlockedAttempt('Service Worker', scriptURL, { allowed: true, source: 'gate' });
       return originalRegisterFn.call(thisArg === fakeContainer ? realSW : thisArg, scriptURL, options);
     }
-    emitBlockedAttempt('Service Worker', scriptURL, { allowed: false, source: 'gate' });
+    // 'deny' AND 'spoof' resolve into the fake registration here — a
+    // convincing no-op registration IS the Service Worker pacifier (v7.2
+    // behavior, preserved); the actions differ only in telemetry source.
+    emitBlockedAttempt('Service Worker', scriptURL, {
+      allowed: false,
+      source: action === 'spoof' ? 'spoof' : 'gate'
+    });
     const fake = createFakeRegistration(scriptURL, options);
     setTimeout(() => {
       try {
@@ -428,6 +457,8 @@
       const eventBuffer = [];
       const pendingOn = {};
       let storedBinaryType = 'blob';
+      let spoofOpen = false;      // v7.3.0: pacified sockets report OPEN forever
+      let closeRequested = false; // v7.3.0: page-initiated close during pacified CONNECTING
 
       Object.defineProperty(phantom, 'url', { value: url, configurable: true, enumerable: true });
       Object.defineProperty(phantom, 'readyState', {
@@ -436,7 +467,13 @@
       });
       Object.defineProperty(phantom, 'protocol', {
         configurable: true, enumerable: true,
-        get() { return realWs ? realWs.protocol : ''; }
+        get() {
+          if (realWs) return realWs.protocol;
+          // v7.3.0: a pacified OPEN socket negotiates the first requested
+          // subprotocol (or '' when none was requested) — native fidelity.
+          if (spoofOpen) return String(protocols || '').split(',')[0] || '';
+          return '';
+        }
       });
       Object.defineProperty(phantom, 'extensions', {
         configurable: true, enumerable: true,
@@ -444,7 +481,7 @@
       });
       Object.defineProperty(phantom, 'bufferedAmount', {
         configurable: true, enumerable: true,
-        get() { return realWs ? realWs.bufferedAmount : sendBuffer.length; }
+        get() { return realWs ? realWs.bufferedAmount : (spoofOpen ? 0 : sendBuffer.length); }
       });
       Object.defineProperty(phantom, 'binaryType', {
         configurable: true, enumerable: true,
@@ -469,6 +506,11 @@
           if (realWs.readyState === 1) realWs.send(data);
           else if (realWs.readyState === 0) sendBuffer.push(data);
           else throw new DOMException('WebSocket is already in CLOSING or CLOSED state.', 'InvalidStateError');
+        } else if (spoofOpen) {
+          // v7.3.0 pacifier: a native OPEN socket accepts sends — we swallow
+          // them silently. bufferedAmount stays 0 (a healthy socket) so
+          // backpressure-watching pages never panic or retry.
+          return;
         } else if (state === 0) {
           sendBuffer.push(data);
         } else {
@@ -477,8 +519,26 @@
       };
 
       phantom.close = function (code, reason) {
-        if (realWs) realWs.close(code, reason);
-        else state = 3;
+        if (realWs) {
+          realWs.close(code, reason);
+          return;
+        }
+        if (spoofOpen) {
+          // v7.3.0: page-initiated closure of a pacified socket settles like
+          // a normal endpoint closure (CLOSED + clean close event).
+          spoofOpen = false;
+          state = 3;
+          setTimeout(() => {
+            fireWsEvent('close', new CloseEvent('close', { code: 1000, reason: '', wasClean: true }));
+          }, 0);
+          return;
+        }
+        if (state === 0) {
+          closeRequested = true;
+          state = 2; // CLOSING — the pending cadence settles CLOSED
+        } else {
+          state = 3;
+        }
       };
 
       phantom.addEventListener = function (type, listener, options) {
@@ -505,8 +565,25 @@
         return true;
       };
 
-      interrogateGatekeeper('WebSocket', url).then((allowed) => {
-        if (allowed) {
+      // Synthetic event fan-out honoring both on-handlers and buffered
+      // listeners (v7.3.0 — shared by the pacifier open/close paths).
+      function fireWsEvent(name, ev) {
+        try {
+          const fn = pendingOn[name];
+          if (typeof fn === 'function') fn.call(phantom, ev);
+          eventBuffer.forEach((e) => {
+            if (e.type === name && typeof e.listener === 'function') {
+              try { e.listener.call(phantom, ev); }
+              catch (err) { console.debug('[Ψ-Ghost] ws listener error:', err); }
+            }
+          });
+        } catch (e) {
+          console.debug('[Ψ-Ghost] ws synthetic event failed:', e);
+        }
+      }
+
+      interrogateGatekeeper('WebSocket', url).then((action) => {
+        if (action === 'allow') {
           emitBlockedAttempt('WebSocket', url, { allowed: true, source: 'gate' });
           realWs = (protocols === undefined || protocols === null)
             ? new OrigWebSocket(url)
@@ -520,7 +597,22 @@
           });
           sendBuffer.forEach((d) => realWs.send(d));
           sendBuffer = [];
+        } else if (action === 'spoof') {
+          // v7.3.0 pacifier: the socket "completes its handshake" at the v7
+          // cadence and stays OPEN forever. Nothing is ever sent; close() is
+          // honored; no error is ever surfaced. Sites that merely want a live
+          // socket keep working and never nag, retry or fall back.
+          emitBlockedAttempt('WebSocket', url, { allowed: false, source: 'spoof' });
+          setTimeout(() => {
+            if (closeRequested || state === 3) return; // page closed mid-handshake
+            state = 1;
+            spoofOpen = true;
+            sendBuffer = []; // the "handshake flush" — nothing was ever sent
+            fireWsEvent('open', new Event('open'));
+          }, GATE_SPOOF_OPEN_MS);
         } else {
+          // v7.2 denial, preserved verbatim: native-faithful handshake
+          // failure — error, then close, at the 40 ms cadence.
           emitBlockedAttempt('WebSocket', url, { allowed: false, source: 'gate' });
           state = 3;
           setTimeout(() => {
@@ -561,6 +653,9 @@
   }
 
   // === SHAREDWORKER GATEKEEPER (coherent allow/deny with retry latch) ===
+  // v7.3.0 note: SharedWorker pacification (a fake MessagePort surface) is
+  // deliberately out of scope — both 'deny' and 'spoof' keep the baseline
+  // SecurityError, which is the native-faithful refusal for SharedWorker.
   if (realShared) {
     const sharedProxy = new Proxy(realShared, {
       construct(target, args) {
@@ -571,8 +666,8 @@
         emitBlockedAttempt('SharedWorker', scriptURL, { allowed: false, source: 'gate' });
         // Prompt is fired for future retries; this construction is denied
         // synchronously with the baseline SecurityError.
-        interrogateGatekeeper('SharedWorker', scriptURL).then((allowed) => {
-          if (allowed) sharedAllowed = true;
+        interrogateGatekeeper('SharedWorker', scriptURL).then((action) => {
+          if (action === 'allow') sharedAllowed = true;
         });
         throw new DOMException('SharedWorker disabled by Ghost Protocol', 'SecurityError');
       }

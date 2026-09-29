@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         4ndr0tools - 4ndr0serviceguarder
 // @namespace    https://github.com/4ndr0666/4ndr0serviceguard
-// @version      7.2.0
+// @version      7.3.0
 // @author       4ndr0666
-// @description  Stealth Service Worker / WebSocket / SharedWorker firewall companion for the 4ndr0serviceguard extension. Default-deny: workers and sockets are spoofed or refused unless the origin is whitelisted; an absolute blacklist overrides everything. Defers to the extension's Gatekeeper whenever the extension is present on the page.
+// @description  Stealth Service Worker / WebSocket / SharedWorker firewall companion for the 4ndr0serviceguard extension. Default-deny with a three-way action model: AUTHORIZE (real), SPOOF (pacified live-looking socket) or DENY (native-faithful failure). Whitelist authorizes, spooflist auto-spoofs silently, the blacklist is an absolute prohibition. Defers to the extension's Gatekeeper whenever the extension is present — and routes list edits to it through the extension's confirm bar.
 // @icon         data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20128%20128%22%20fill%3D%22none%22%20stroke%3D%22%2300E5FF%22%20stroke-width%3D%223%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M%2064%2C12%20A%2052%2C52%200%201%201%2063.9%2C12%20Z%22%20stroke-dasharray%3D%2221.78%2021.78%22%20stroke-width%3D%222%22%2F%3E%3Cpath%20d%3D%22M%2064%2C20%20A%2044%2C44%200%201%201%2063.9%2C20%20Z%22%20stroke-dasharray%3D%2210%2010%22%20stroke-width%3D%221.5%22%20opacity%3D%220.7%22%2F%3E%3Cpath%20d%3D%22M64%2030%20L91.3%2047%20L91.3%2081%20L64%2098%20L36.7%2081%20L36.7%2047%20Z%22%2F%3E%3Ctext%20x%3D%2264%22%20y%3D%2267%22%20text-anchor%3D%22middle%22%20dominant-baseline%3D%22middle%22%20fill%3D%22%2300E5FF%22%20stroke%3D%22none%22%20font-size%3D%2256%22%20font-weight%3D%22700%22%20font-family%3D%22Cinzel%20Decorative%2C%20serif%22%3E%CE%A8%3C%2Ftext%3E%3C%2Fsvg%3E
 // @license      UNLICENSED - RED TEAM USE ONLY
 // @match        *://*/*
@@ -17,17 +17,22 @@
 // @grant        GM_notification
 // ==/UserScript==
 
-// 4ndr0tools - 4ndr0serviceguarder v7.2.0 — completed helper userscript.
+// 4ndr0tools - 4ndr0serviceguarder v7.3.0 — completed helper userscript.
 //
 // Paradigm (D1): Proxy-based interception facade in the page (MAIN) context,
 // mirroring ghost_core_v7.js — single paradigm, zero chimera.
 //
 // Vision: restore power to the user. Workers and WebSockets are denied by
-// default period; the whitelist grants explicit allowance; the blacklist is
-// an absolute prohibition that overrides the whitelist, the master toggle,
-// the DDoS-Guard fast path and pass-through mode — exactly the enforcement
-// order the extension's background gate applies (rate → blacklist → toggle
-// → DDoS-Guard → whitelist → default-deny).
+// default period; every settled decision is one of three ACTIONS:
+//   AUTHORIZE — the real connection runs (explicit allowance only)
+//   SPOOF     — a pacified phantom: CONNECTING→OPEN at the 40 ms cadence,
+//               synthetic open, sends swallowed silently, close() honored.
+//               The page believes it has a live socket; it never nags,
+//               retries, or falls back to noisier channels.
+//   DENY      — native-faithful handshake failure (error+close at 40 ms).
+// Three silent lists back the model (order mirrors the extension's gate
+// exactly): blacklist (deny) → spooflist (spoof) → master toggle →
+// DDoS-Guard fast path → whitelist (allow) → default-deny.
 //
 // Companion-mode doctrine (no double gating):
 //   - If the extension's guard flag (window._4ndr0ghostV7) is already set at
@@ -38,6 +43,14 @@
 //     conduit to whatever the extension layered on top of it (or beneath
 //     it) — the extension's Gatekeeper runs exactly once either way.
 //
+// Policy bridge (v7.3.0 — the split-brain fix): on extension-governed pages
+// the menu/HUD list commands used to edit only GM-local lists, so the
+// extension never learned about them and its prompts kept firing (the
+// "blacklisting does not stop the popup" field report). List edits on
+// governed pages now post a policyRequest window message; the extension's
+// ghost_bridge answers with a CONFIRM bar, and only a genuine click writes
+// the REAL extension list. Local GM lists stay intact for standalone pages.
+//
 // Stealth doctrine (bugbugnow.net v0.3.0 techniques, ported from
 // ghost_core_v7.js): Proxy-based hooks keep toString()/name/length native;
 // the phantom ServiceWorkerContainer is a memoized identity-stable singleton;
@@ -46,8 +59,8 @@
 // rejecting (rejections are trivially detectable and break pages harder).
 //
 // Storage keys: the baseline whitelist key ('4ndr0guard_whitelist_v6') is
-// preserved verbatim so existing user data survives the upgrade; blacklist
-// and toggle state live in sibling keys.
+// preserved verbatim so existing user data survives the upgrade; blacklist,
+// spooflist and toggle state live in sibling keys.
 
 ;(function (win) {
   'use strict';
@@ -62,10 +75,12 @@
 
   const WHITELIST_KEY = '4ndr0guard_whitelist_v6';  // baseline key: user data preserved
   const BLACKLIST_KEY = '4ndr0guard_blacklist_v7';
+  const SPOOFLIST_KEY = '4ndr0guard_spooflist_v7';  // v7.3.0: silent auto-spoof
   const ENABLED_KEY = '4ndr0guard_enabled_v7';
   const NOTIFY_KEY = '4ndr0guard_notify_v7';
 
   const GATE_DENY_EVENT_MS = 40;    // denied-event cadence (v7 doctrine)
+  const GATE_SPOOF_OPEN_MS = 40;   // v7.3.0: pacified sockets "open" at the same cadence
   const CONTROLLERCHANGE_MS = 25;   // blocked-registration lifecycle dispatch
   const NOTIFY_MIN_INTERVAL_MS = 8000;
   const NOTIFY_MAX_SESSION = 20;
@@ -81,6 +96,7 @@
 
   let whitelist = loadList(WHITELIST_KEY);
   let blacklist = loadList(BLACKLIST_KEY);
+  let spooflist = loadList(SPOOFLIST_KEY); // v7.3.0
   let enabled = GM_getValue(ENABLED_KEY, true) !== false; // default-deny period
   let denyNotifications = GM_getValue(NOTIFY_KEY, false) === true; // stealth by default
 
@@ -102,6 +118,11 @@
     GM_setValue(BLACKLIST_KEY, blacklist);
   }
 
+  function persistSpooflist() {
+    spooflist = Array.from(new Set(spooflist));
+    GM_setValue(SPOOFLIST_KEY, spooflist);
+  }
+
   function hostnameOf(url) {
     try { return new win.URL(String(url), win.location.href).hostname.toLowerCase(); }
     catch (e) { return ''; }
@@ -115,6 +136,7 @@
 
   function isWhitelisted(url) { return listMatches(whitelist, url); }
   function isBlacklisted(url) { return listMatches(blacklist, url); }
+  function isSpooflisted(url) { return listMatches(spooflist, url); }
 
   // DDoS-Guard fast path — the full four-pattern heuristic (the unfinished
   // baseline draft only matched one; the extension core matches all four).
@@ -141,20 +163,26 @@
     try { return win.location.origin; } catch (e) { return ''; }
   })();
 
+  // v7.3.0: three-way action model. The returned object keeps the v7.2
+  // `allow` flag (true only for AUTHORIZE) so every existing call site keeps
+  // working; new call sites read `action`.
   function decide(targetUrl) {
     if (isBlacklisted(targetUrl) || (pageOrigin && isBlacklisted(pageOrigin))) {
-      return { allow: false, reason: 'blacklist' };
+      return { allow: false, action: 'deny', reason: 'blacklist' };
+    }
+    if (isSpooflisted(targetUrl) || (pageOrigin && isSpooflisted(pageOrigin))) {
+      return { allow: false, action: 'spoof', reason: 'spooflist' };
     }
     if (!enabled) {
-      return { allow: true, reason: 'disabled' };
+      return { allow: true, action: 'allow', reason: 'disabled' };
     }
     if (isDDoSGuardChallenge(targetUrl)) {
-      return { allow: true, reason: 'ddos-guard' };
+      return { allow: true, action: 'allow', reason: 'ddos-guard' };
     }
     if (isWhitelisted(targetUrl) || (pageOrigin && isWhitelisted(pageOrigin))) {
-      return { allow: true, reason: 'whitelist' };
+      return { allow: true, action: 'allow', reason: 'whitelist' };
     }
-    return { allow: false, reason: 'default-deny' };
+    return { allow: false, action: 'deny', reason: 'default-deny' };
   }
 
   function notifyDeny(kind, target) {
@@ -174,6 +202,51 @@
         });
       }
     } catch (e) { /* notification channel is best-effort; never break the page */ }
+  }
+
+  function notifyUser(text) {
+    try {
+      if (typeof GM_notification === 'function') {
+        GM_notification({ title: 'Ψ Ghost Protocol', text: String(text).slice(0, 120), timeout: 3000 });
+      }
+    } catch (e) { /* best-effort */ }
+  }
+
+  // === POLICY BRIDGE (v7.3.0 split-brain fix) ===
+  //
+  // On extension-governed pages, list edits must reach the EXTENSION's
+  // storage or its gate keeps prompting. The request is posted to the page;
+  // ghost_bridge.js (ISOLATED world) answers with a CONFIRM bar, and only a
+  // genuine click writes the real extension list. The message itself is
+  // forgeable by the page — that is exactly why the extension requires the
+  // isTrusted CONFIRM click before anything is written.
+
+  function requestPolicyBridge(kind, domain, value) {
+    try {
+      win.postMessage({
+        __4ndr0guard: 'policyRequest',
+        kind: kind,
+        domain: domain || '',
+        value: value
+      }, '*');
+      return true;
+    } catch (e) {
+      console.debug('[Ψ-Ghost] policy bridge post failed:', e);
+      return false;
+    }
+  }
+
+  // Routes an edit to the extension when it governs, otherwise runs it
+  // locally — one call site for menus and HUD buttons alike.
+  function bridgeOrLocal(kind, domain, value, localFn) {
+    if (extensionActive()) {
+      if (requestPolicyBridge(kind, domain, value)) {
+        notifyUser('Requested ' + kind + (domain ? ' for ' + domain : '') +
+          ' — confirm it in the page bar');
+      }
+      return;
+    }
+    localFn();
   }
 
   // === CAPTURED REAL REFERENCES (page context, immune to later shadowing) ===
@@ -340,6 +413,9 @@
     if (verdict.allow && originalRegisterFn) {
       return originalRegisterFn.call(thisArg === fakeContainer ? realSW : thisArg, scriptURL, options);
     }
+    // 'deny' AND 'spoof' resolve into the fake registration — a convincing
+    // no-op registration IS the Service Worker pacifier (mirrors the
+    // extension's ghost_core_v7.js v7.3.0 doctrine).
     stats.sw += 1;
     notifyDeny('Service Worker', scriptURL);
     const fake = createFakeRegistration(scriptURL, options);
@@ -468,18 +544,23 @@
     }
   }
 
-  // === WEBSOCKET PHANTOM (Proxy construct trap, native-faithful denial) ===
+  // === WEBSOCKET PHANTOM (Proxy construct trap, three-way action model) ===
   //
   // Allowed connections pass through untouched (100% native objects — zero
-  // detection surface). Denied connections resolve into buffered phantom
+  // detection surface). DENIED connections resolve into buffered phantom
   // sockets: CONNECTING state, live property surface, native-faithful
-  // error/close events at the 40 ms cadence — never a rejection.
+  // error/close events at the 40 ms cadence — never a rejection (v7.2
+  // behavior, preserved verbatim). SPOOFED connections pacify: the phantom
+  // "opens" at the same cadence, swallows every send() silently, reports a
+  // healthy bufferedAmount of 0, and honors close() with a clean close
+  // event — the page believes it has a live socket for the session.
 
-  function makePhantomWebSocket(url, protocols) {
+  function makePhantomWebSocket(url, protocols, action) {
     const phantom = Object.create(OrigWebSocket.prototype);
     let state = 0;
     let sendBuffer = [];
     let closeRequested = false;
+    let spoofOpen = false;
     const eventBuffer = [];
     const pendingOn = {};
     let storedBinaryType = 'blob';
@@ -491,7 +572,10 @@
     });
     Object.defineProperty(phantom, 'protocol', {
       configurable: true, enumerable: true,
-      get() { return state === 1 ? String(protocols || '').split(',')[0] || '' : ''; }
+      get() {
+        if (spoofOpen) return String(protocols || '').split(',')[0] || '';
+        return '';
+      }
     });
     Object.defineProperty(phantom, 'extensions', {
       configurable: true, enumerable: true,
@@ -499,7 +583,7 @@
     });
     Object.defineProperty(phantom, 'bufferedAmount', {
       configurable: true, enumerable: true,
-      get() { return sendBuffer.length; }
+      get() { return spoofOpen ? 0 : sendBuffer.length; }
     });
     Object.defineProperty(phantom, 'binaryType', {
       configurable: true, enumerable: true,
@@ -517,6 +601,11 @@
     });
 
     phantom.send = function (data) {
+      if (spoofOpen) {
+        // v7.3.0 pacifier: a native OPEN socket accepts sends — swallow them
+        // silently. bufferedAmount stays 0 so backpressure watchers relax.
+        return;
+      }
       if (state === 0) {
         sendBuffer.push(data); // native CONNECTING semantics: buffer the frame
         return;
@@ -525,6 +614,16 @@
     };
 
     phantom.close = function () {
+      if (spoofOpen) {
+        // v7.3.0: page-initiated closure of a pacified socket settles like a
+        // normal endpoint closure (CLOSED + clean close event).
+        spoofOpen = false;
+        state = 3;
+        setTimeout(() => {
+          fireWsEvent('close', new win.CloseEvent('close', { code: 1000, reason: '', wasClean: true }));
+        }, 0);
+        return;
+      }
       closeRequested = true;
       if (state === 0) state = 2; // CLOSING, then the cadence timer settles CLOSED
     };
@@ -548,33 +647,64 @@
       return true;
     };
 
-    // Denied-event cadence: handshake "fails" after 40 ms — error (unless the
-    // page already called close(), which natively yields close-only), then close.
-    setTimeout(() => {
-      state = 3;
+    // Synthetic event fan-out honoring both on-handlers and buffered
+    // listeners (v7.3.0 — shared by the pacifier open/close paths).
+    function fireWsEvent(name, ev) {
       try {
-        if (!closeRequested) {
-          if (typeof phantom.onerror === 'function') phantom.onerror(new win.Event('error'));
-          eventBuffer.forEach((e) => {
-            if (e.type === 'error' && typeof e.listener === 'function') {
-              try { e.listener.call(phantom, new win.Event('error')); }
-              catch (err) { console.debug('[Ψ-Ghost] ws listener error:', err); }
-            }
-          });
-        }
-        const closeEv = new win.CloseEvent('close');
-        if (typeof phantom.onclose === 'function') phantom.onclose(closeEv);
+        const fn = pendingOn[name];
+        if (typeof fn === 'function') fn.call(phantom, ev);
         eventBuffer.forEach((e) => {
-          if (e.type === 'close' && typeof e.listener === 'function') {
-            try { e.listener.call(phantom, closeEv); }
+          if (e.type === name && typeof e.listener === 'function') {
+            try { e.listener.call(phantom, ev); }
             catch (err) { console.debug('[Ψ-Ghost] ws listener error:', err); }
           }
         });
-        sendBuffer = [];
       } catch (e) {
-        console.debug('[Ψ-Ghost] denied-event cadence failed:', e);
+        console.debug('[Ψ-Ghost] ws synthetic event failed:', e);
       }
-    }, GATE_DENY_EVENT_MS);
+    }
+
+    if (action === 'spoof') {
+      // v7.3.0 pacifier: "handshake" completes at the v7 cadence, then the
+      // socket stays OPEN for the session. Nothing is ever sent; close() is
+      // honored; no error is ever surfaced.
+      setTimeout(() => {
+        if (closeRequested || state === 3) return; // page closed mid-handshake
+        state = 1;
+        spoofOpen = true;
+        sendBuffer = []; // the "handshake flush" — nothing was ever sent
+        fireWsEvent('open', new win.Event('open'));
+      }, GATE_SPOOF_OPEN_MS);
+    } else {
+      // Denied-event cadence (v7.2, preserved): handshake "fails" after
+      // 40 ms — error (unless the page already called close(), which
+      // natively yields close-only), then close.
+      setTimeout(() => {
+        state = 3;
+        try {
+          if (!closeRequested) {
+            if (typeof phantom.onerror === 'function') phantom.onerror(new win.Event('error'));
+            eventBuffer.forEach((e) => {
+              if (e.type === 'error' && typeof e.listener === 'function') {
+                try { e.listener.call(phantom, new win.Event('error')); }
+                catch (err) { console.debug('[Ψ-Ghost] ws listener error:', err); }
+              }
+            });
+          }
+          const closeEv = new win.CloseEvent('close');
+          if (typeof phantom.onclose === 'function') phantom.onclose(closeEv);
+          eventBuffer.forEach((e) => {
+            if (e.type === 'close' && typeof e.listener === 'function') {
+              try { e.listener.call(phantom, closeEv); }
+              catch (err) { console.debug('[Ψ-Ghost] ws listener error:', err); }
+            }
+          });
+          sendBuffer = [];
+        } catch (e) {
+          console.debug('[Ψ-Ghost] denied-event cadence failed:', e);
+        }
+      }, GATE_DENY_EVENT_MS);
+    }
 
     return phantom;
   }
@@ -611,7 +741,7 @@
 
         stats.ws += 1;
         notifyDeny('WebSocket', url);
-        return makePhantomWebSocket(url, protocols);
+        return makePhantomWebSocket(url, protocols, verdict.action);
       },
       apply() {
         // Native classes throw when invoked without `new` — mirror that.
@@ -636,6 +766,10 @@
   }
 
   // === SHAREDWORKER GATEKEEPER (coherent allow/deny) ===
+  //
+  // v7.3.0 note: SharedWorker pacification (a fake MessagePort surface) is
+  // deliberately out of scope — both 'deny' and 'spoof' keep the baseline
+  // SecurityError, mirroring the extension's ghost_core_v7.js doctrine.
 
   function installSharedWorkerGate() {
     if (!realShared) return;
@@ -681,7 +815,7 @@
     }
   }
 
-  // === LIST MANAGEMENT (mutual exclusion on single-domain adds) ===
+  // === LIST MANAGEMENT (three-way mutual exclusion on single-domain adds) ===
 
   function currentDomain() {
     return normalizeDomain(win.location.hostname);
@@ -694,14 +828,13 @@
     if (!whitelist.includes(clean)) { whitelist.push(clean); changed = true; }
     const blIdx = blacklist.indexOf(clean);
     if (blIdx !== -1) { blacklist.splice(blIdx, 1); changed = true; }
+    const slIdx = spooflist.indexOf(clean);
+    if (slIdx !== -1) { spooflist.splice(slIdx, 1); changed = true; }
     if (changed) {
       persistWhitelist();
       persistBlacklist();
-      try {
-        if (typeof GM_notification === 'function') {
-          GM_notification({ title: 'Ψ Ghost Protocol', text: 'Whitelisted: ' + clean, timeout: 3000 });
-        }
-      } catch (e) { /* best-effort */ }
+      persistSpooflist();
+      notifyUser('Whitelisted: ' + clean);
     }
     return changed;
   }
@@ -713,14 +846,32 @@
     if (!blacklist.includes(clean)) { blacklist.push(clean); changed = true; }
     const wlIdx = whitelist.indexOf(clean);
     if (wlIdx !== -1) { whitelist.splice(wlIdx, 1); changed = true; }
+    const slIdx = spooflist.indexOf(clean);
+    if (slIdx !== -1) { spooflist.splice(slIdx, 1); changed = true; }
     if (changed) {
       persistBlacklist();
       persistWhitelist();
-      try {
-        if (typeof GM_notification === 'function') {
-          GM_notification({ title: 'Ψ Ghost Protocol', text: 'Blacklisted: ' + clean, timeout: 3000 });
-        }
-      } catch (e) { /* best-effort */ }
+      persistSpooflist();
+      notifyUser('Blacklisted: ' + clean);
+    }
+    return changed;
+  }
+
+  // v7.3.0: silent auto-spoof list — the "never ask, just spoof" registry.
+  function addToSpooflist(domain) {
+    const clean = normalizeDomain(domain);
+    if (!clean) return false;
+    let changed = false;
+    if (!spooflist.includes(clean)) { spooflist.push(clean); changed = true; }
+    const wlIdx = whitelist.indexOf(clean);
+    if (wlIdx !== -1) { whitelist.splice(wlIdx, 1); changed = true; }
+    const blIdx = blacklist.indexOf(clean);
+    if (blIdx !== -1) { blacklist.splice(blIdx, 1); changed = true; }
+    if (changed) {
+      persistSpooflist();
+      persistWhitelist();
+      persistBlacklist();
+      notifyUser('Spooflisted: ' + clean + ' (never asks, silent spoof)');
     }
     return changed;
   }
@@ -729,71 +880,57 @@
     const clean = normalizeDomain(domain);
     const wlIdx = whitelist.indexOf(clean);
     const blIdx = blacklist.indexOf(clean);
+    const slIdx = spooflist.indexOf(clean);
     if (wlIdx !== -1) whitelist.splice(wlIdx, 1);
     if (blIdx !== -1) blacklist.splice(blIdx, 1);
-    if (wlIdx !== -1 || blIdx !== -1) {
+    if (slIdx !== -1) spooflist.splice(slIdx, 1);
+    if (wlIdx !== -1 || blIdx !== -1 || slIdx !== -1) {
       persistWhitelist();
       persistBlacklist();
+      persistSpooflist();
       return true;
     }
     return false;
   }
 
   // Baseline UX preserved: prompt()/confirm() dialogs for list editing.
+  // Bulk edits stay LOCAL — on extension-governed pages the per-site menu
+  // commands are the bridged path (see bridgeOrLocal).
   function editList(kind) {
-    const isWhitelistKind = kind === 'whitelist';
-    const current = (isWhitelistKind ? whitelist : blacklist).join('\n');
-    const input = win.prompt(
-      isWhitelistKind
-        ? 'Whitelist (one domain per line) — explicit allowance:'
-        : 'Blacklist (one domain per line) — absolute prohibition:',
-      current
-    );
+    const titles = {
+      whitelist: 'Whitelist (one domain per line) — explicit allowance:',
+      spooflist: 'Spooflist (one domain per line) — silent auto-spoof, never asks:',
+      blacklist: 'Blacklist (one domain per line) — absolute prohibition:'
+    };
+    const lists = { whitelist: whitelist, spooflist: spooflist, blacklist: blacklist };
+    const current = (lists[kind] || []).join('\n');
+    const input = win.prompt(titles[kind] || 'Domains (one per line):', current);
     if (input === null) return;
     const lines = input.split('\n').map((l) => normalizeDomain(l)).filter(Boolean);
-    if (isWhitelistKind) {
-      whitelist = Array.from(new Set(lines));
-      persistWhitelist();
-    } else {
-      blacklist = Array.from(new Set(lines));
-      persistBlacklist();
-    }
-    try {
-      if (typeof GM_notification === 'function') {
-        GM_notification({ title: 'Ψ Ghost Protocol', text: (isWhitelistKind ? 'Whitelist' : 'Blacklist') + ' updated', timeout: 3000 });
-      }
-    } catch (e) { /* best-effort */ }
+    if (kind === 'whitelist') { whitelist = Array.from(new Set(lines)); persistWhitelist(); }
+    else if (kind === 'spooflist') { spooflist = Array.from(new Set(lines)); persistSpooflist(); }
+    else { blacklist = Array.from(new Set(lines)); persistBlacklist(); }
+    notifyUser((kind || 'List') + ' updated');
   }
 
   function clearList(kind) {
-    const isWhitelistKind = kind === 'whitelist';
-    const ok = win.confirm(
-      isWhitelistKind
-        ? 'Clear the entire whitelist? All origins fall back to default-deny.'
-        : 'Clear the entire blacklist? Blacklisted origins return to normal gating.'
-    );
+    const prompts = {
+      whitelist: 'Clear the entire whitelist? All origins fall back to default-deny.',
+      spooflist: 'Clear the entire spooflist? Spooflisted origins return to normal gating.',
+      blacklist: 'Clear the entire blacklist? Blacklisted origins return to normal gating.'
+    };
+    const ok = win.confirm(prompts[kind] || 'Clear this list?');
     if (!ok) return;
-    if (isWhitelistKind) { whitelist = []; persistWhitelist(); }
+    if (kind === 'whitelist') { whitelist = []; persistWhitelist(); }
+    else if (kind === 'spooflist') { spooflist = []; persistSpooflist(); }
     else { blacklist = []; persistBlacklist(); }
-    try {
-      if (typeof GM_notification === 'function') {
-        GM_notification({ title: 'Ψ Ghost Protocol', text: (isWhitelistKind ? 'Whitelist' : 'Blacklist') + ' cleared', timeout: 3000 });
-      }
-    } catch (e) { /* best-effort */ }
+    notifyUser((kind || 'List') + ' cleared');
   }
 
   function setEnabled(next) {
     enabled = next !== false;
     GM_setValue(ENABLED_KEY, enabled);
-    try {
-      if (typeof GM_notification === 'function') {
-        GM_notification({
-          title: 'Ψ Ghost Protocol',
-          text: enabled ? 'ACTIVE — default deny' : 'DISABLED — pass-through (reload pages)',
-          timeout: 3000
-        });
-      }
-    } catch (e) { /* best-effort */ }
+    notifyUser(enabled ? 'ACTIVE — default deny' : 'DISABLED — pass-through (reload pages)');
   }
 
   // === STATUS HUD (3lectric-Glass paradigm, shadow-DOM isolated) ===
@@ -866,6 +1003,7 @@
       '.row .k { color: rgba(0, 229, 255, 0.7); text-transform: uppercase; letter-spacing: 1px; font-size: 10px; }',
       '.row .v { color: #67E8F9; text-align: right; word-break: break-all; }',
       '.row .v.destructive { color: #ff0055; }',
+      '.row .v.spoof { color: #ffaa00; }',
       '.note { margin: 8px 0 0 0; font-size: 10px; line-height: 1.5;',
       '  color: rgba(0, 229, 255, 0.7); }',
       '.actions { display: flex; gap: 6px; padding: 12px 12px 0 12px; }',
@@ -879,29 +1017,32 @@
       '.actions button.destructive { border-color: #ff0055; color: #ff0055; }',
       '.actions button.destructive:hover { background: rgba(255, 0, 85, 0.3);',
       '  box-shadow: 0 0 25px #ff0055; color: #ffffff; }',
+      '.actions button.spoof { border-color: rgba(255, 170, 0, 0.55); color: #ffaa00; }',
+      '.actions button.spoof:hover { background: rgba(255, 170, 0, 0.2);',
+      '  box-shadow: 0 0 20px rgba(255, 170, 0, 0.45); color: #ffd27a; }',
       '.actions button:disabled { opacity: 0.45; cursor: default; box-shadow: none; }'
     ].join('\n');
     return style;
   }
 
-  function hudRow(label, value, destructive) {
+  function hudRow(label, value, valueClass) {
     const row = document.createElement('div');
     row.className = 'row';
     const k = document.createElement('span');
     k.className = 'k';
     k.textContent = label;
     const v = document.createElement('span');
-    v.className = 'v' + (destructive ? ' destructive' : '');
+    v.className = 'v' + (valueClass ? ' ' + valueClass : '');
     v.textContent = value;
     row.appendChild(k);
     row.appendChild(v);
     return row;
   }
 
-  function hudButton(label, destructive, onClick) {
+  function hudButton(label, cls, onClick) {
     const btn = document.createElement('button');
     btn.textContent = label;
-    if (destructive) btn.className = 'destructive';
+    if (cls) btn.className = cls;
     btn.addEventListener('click', onClick);
     return btn;
   }
@@ -917,6 +1058,8 @@
     if (hudOpen) { closeHud(); return; }
     if (!document.documentElement) return;
     hudOpen = true;
+
+    const governed = extensionOwnedAtInstall || extensionActive();
 
     const host = document.createElement('div');
     host.id = HUD_HOST_ID;
@@ -936,9 +1079,7 @@
     title.textContent = 'GHOST PROTOCOL';
     const subtitle = document.createElement('div');
     subtitle.className = 'subtitle';
-    subtitle.textContent = extensionOwnedAtInstall || extensionActive()
-      ? 'EXTENSION-LINKED v7.2'
-      : 'STANDALONE v7.2';
+    subtitle.textContent = governed ? 'EXTENSION-LINKED v7.3' : 'STANDALONE v7.3';
     headerText.appendChild(title);
     headerText.appendChild(subtitle);
     header.appendChild(headerText);
@@ -949,33 +1090,37 @@
     body.className = 'body';
     const domain = currentDomain() || '(no domain)';
     body.appendChild(hudRow('DOMAIN', domain));
-    body.appendChild(hudRow('MODE', extensionOwnedAtInstall || extensionActive()
+    body.appendChild(hudRow('MODE', governed
       ? 'Extension governs this page'
       : 'Local gate (this script)'));
-    body.appendChild(hudRow('MASTER', enabled ? 'ACTIVE — DEFAULT DENY' : 'DISABLED — PASS-THROUGH', !enabled));
-    const wlRow = hudRow('WHITELIST', String(whitelist.length) + ' domain(s)');
-    body.appendChild(wlRow);
-    body.appendChild(hudRow('BLACKLIST', String(blacklist.length) + ' domain(s)', blacklist.length > 0));
+    body.appendChild(hudRow('MASTER', enabled ? 'ACTIVE — DEFAULT DENY' : 'DISABLED — PASS-THROUGH', !enabled ? 'destructive' : ''));
+    body.appendChild(hudRow('WHITELIST', String(whitelist.length) + ' domain(s)'));
+    body.appendChild(hudRow('SPOOFLIST', String(spooflist.length) + ' domain(s)', spooflist.length > 0 ? 'spoof' : ''));
+    body.appendChild(hudRow('BLACKLIST', String(blacklist.length) + ' domain(s)', blacklist.length > 0 ? 'destructive' : ''));
     body.appendChild(hudRow('SESSION', 'SW ' + stats.sw + ' · WS ' + stats.ws + ' · SHR ' + stats.shared + ' · PURGED ' + stats.purged));
     panel.appendChild(body);
 
-    if (extensionOwnedAtInstall || extensionActive()) {
+    if (governed) {
       const note = document.createElement('p');
       note.className = 'note';
-      note.textContent = 'The 4ndr0serviceguard extension is active on this page — its Gatekeeper owns enforcement. This script stands down to avoid double gating. Local lists below apply on pages where the extension is absent.';
+      note.textContent = 'The 4ndr0serviceguard extension is active on this page — its Gatekeeper owns enforcement. Site rules below route to the extension through its CONFIRM bar, so both surfaces stay in sync. Local GM lists still apply on pages where the extension is absent.';
       panel.appendChild(note);
     }
 
-    // Actions
+    // Actions — one row per decision family (v7.3.0 three-way model)
     const actions = document.createElement('div');
     actions.className = 'actions';
-    actions.appendChild(hudButton('WHITELIST DOMAIN', false, () => {
-      addToWhitelist(currentDomain());
+    actions.appendChild(hudButton('AUTHORIZE SITE', '', () => {
+      bridgeOrLocal('whitelist', currentDomain(), undefined, () => {
+        addToWhitelist(currentDomain());
+      });
       closeHud();
       showHud(); // re-render with fresh state
     }));
-    actions.appendChild(hudButton('BLACKLIST DOMAIN', true, () => {
-      addToBlacklist(currentDomain());
+    actions.appendChild(hudButton('SPOOF SITE', 'spoof', () => {
+      bridgeOrLocal('spooflist', currentDomain(), undefined, () => {
+        addToSpooflist(currentDomain());
+      });
       closeHud();
       showHud();
     }));
@@ -983,28 +1128,38 @@
 
     const actions2 = document.createElement('div');
     actions2.className = 'actions';
-    const purgeBtn = hudButton('PURGE WORKERS', false, () => {
+    actions2.appendChild(hudButton('BLOCK SITE', 'destructive', () => {
+      bridgeOrLocal('blacklist', currentDomain(), undefined, () => {
+        addToBlacklist(currentDomain());
+      });
+      closeHud();
+      showHud();
+    }));
+    actions2.appendChild(hudButton('RESET SITE', '', () => {
+      bridgeOrLocal('reset', currentDomain(), undefined, () => {
+        removeFromLists(currentDomain());
+      });
+      closeHud();
+      showHud();
+    }));
+    panel.appendChild(actions2);
+
+    const actions3 = document.createElement('div');
+    actions3.className = 'actions';
+    const purgeBtn = hudButton('PURGE WORKERS', '', () => {
       purgeExistingWorkers().then((done) => {
-        try {
-          if (typeof GM_notification === 'function') {
-            GM_notification({
-              title: 'Ψ Ghost Protocol',
-              text: done ? 'Service Workers purged, caches cleared' : 'No registrations to purge',
-              timeout: 3000
-            });
-          }
-        } catch (e) { /* best-effort */ }
+        notifyUser(done ? 'Service Workers purged, caches cleared' : 'No registrations to purge');
         closeHud();
         showHud();
       });
     });
-    if (extensionOwnedAtInstall || extensionActive()) {
+    if (governed) {
       purgeBtn.disabled = true;
       purgeBtn.title = 'The extension owns purge timing on this page';
     }
-    actions2.appendChild(purgeBtn);
-    actions2.appendChild(hudButton('CLOSE', false, () => closeHud()));
-    panel.appendChild(actions2);
+    actions3.appendChild(purgeBtn);
+    actions3.appendChild(hudButton('CLOSE', '', () => closeHud()));
+    panel.appendChild(actions3);
 
     document.documentElement.appendChild(host);
 
@@ -1029,45 +1184,44 @@
     if (typeof GM_registerMenuCommand !== 'function') return;
     if (!isTopFrame()) return;
 
-    GM_registerMenuCommand('Ψ Toggle Ghost Protocol (master)', () => setEnabled(!enabled));
-    GM_registerMenuCommand('Whitelist current domain', () => {
-      addToWhitelist(currentDomain());
+    GM_registerMenuCommand('Ψ Toggle Ghost Protocol (master)', () => {
+      bridgeOrLocal('toggle', null, !enabled, () => setEnabled(!enabled));
+    });
+    GM_registerMenuCommand('Authorize current domain (whitelist)', () => {
+      bridgeOrLocal('whitelist', currentDomain(), undefined, () => {
+        addToWhitelist(currentDomain());
+      });
+    });
+    GM_registerMenuCommand('Spoof current domain — never ask (spooflist)', () => {
+      bridgeOrLocal('spooflist', currentDomain(), undefined, () => {
+        addToSpooflist(currentDomain());
+      });
     });
     GM_registerMenuCommand('Blacklist current domain', () => {
-      addToBlacklist(currentDomain());
+      bridgeOrLocal('blacklist', currentDomain(), undefined, () => {
+        addToBlacklist(currentDomain());
+      });
     });
     GM_registerMenuCommand('Remove current domain from lists', () => {
-      removeFromLists(currentDomain());
+      bridgeOrLocal('reset', currentDomain(), undefined, () => {
+        removeFromLists(currentDomain());
+      });
     });
     GM_registerMenuCommand('Edit whitelist…', () => editList('whitelist'));
+    GM_registerMenuCommand('Edit spooflist…', () => editList('spooflist'));
     GM_registerMenuCommand('Edit blacklist…', () => editList('blacklist'));
     GM_registerMenuCommand('Clear whitelist', () => clearList('whitelist'));
+    GM_registerMenuCommand('Clear spooflist', () => clearList('spooflist'));
     GM_registerMenuCommand('Clear blacklist', () => clearList('blacklist'));
     GM_registerMenuCommand('Purge Service Workers now', () => {
       purgeExistingWorkers().then((done) => {
-        try {
-          if (typeof GM_notification === 'function') {
-            GM_notification({
-              title: 'Ψ Ghost Protocol',
-              text: done ? 'Service Workers purged, caches cleared' : 'No registrations to purge',
-              timeout: 3000
-            });
-          }
-        } catch (e) { /* best-effort */ }
+        notifyUser(done ? 'Service Workers purged, caches cleared' : 'No registrations to purge');
       });
     });
     GM_registerMenuCommand('Toggle deny notifications', () => {
       denyNotifications = !denyNotifications;
       GM_setValue(NOTIFY_KEY, denyNotifications);
-      try {
-        if (typeof GM_notification === 'function') {
-          GM_notification({
-            title: 'Ψ Ghost Protocol',
-            text: denyNotifications ? 'Deny notifications ON' : 'Deny notifications OFF (stealth)',
-            timeout: 3000
-          });
-        }
-      } catch (e) { /* best-effort */ }
+      notifyUser(denyNotifications ? 'Deny notifications ON' : 'Deny notifications OFF (stealth)');
     });
     GM_registerMenuCommand('Show status HUD (Ψ)', () => showHud());
   }
@@ -1089,8 +1243,9 @@
   installSharedWorkerGate();
   installCSPListener();
 
-  // Purge-on-load: only when this origin is actively denied (the extension's
-  // doctrine — purge requires the ghost to be active for the origin).
+  // Purge-on-load: only when this origin is actively denied or spoofed (the
+  // extension's doctrine — purge requires the ghost to be active for the
+  // origin; a spooflisted origin is guarded exactly like a denied one).
   if (!decide(pageOrigin).allow) {
     purgeExistingWorkers();
   }

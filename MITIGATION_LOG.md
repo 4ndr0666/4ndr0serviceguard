@@ -1,8 +1,10 @@
-# Mitigation Log — v7.0.0 → v7.1.0 → v7.1.1 → v7.2.0
+# Mitigation Log — v7.0.0 → v7.1.0 → v7.1.1 → v7.2.0 → v7.3.0
 
-Baseline: commit `602c1c4` ("Bumped to version 7.0"). Candidate: v7.2.0
+Baseline: commit `602c1c4` ("Bumped to version 7.0"). Candidate: v7.3.0
 (v7.1.0 = commit `67253b1`, superseded by the field-report hardening below;
-v7.1.1 baseline = commit `104c844` "created helper script for GUP audit").
+v7.1.1 baseline = commit `104c844` "created helper script for GUP audit";
+v7.2.0 = commit `264fa5b`, the blacklist/completion release — and the baseline
+for this cycle's superset verification).
 Reference: https://www.bugbugnow.net/2020/03/Reject-to-register-a-ServiceWorker.html
 (and, "not limited to": Chrome extension platform documentation, MV3 lifecycle
 semantics, and the repository's own historical design intent).
@@ -237,3 +239,89 @@ userscript's baseline guarantees (GM storage whitelist key and format, list
 matching semantics, menu-command UX with prompt/confirm dialogs,
 @match/@run-at coverage, the Ψ @icon and the `__4ndr0ghostUserV7` guard
 flag) — re-implemented on working, stealth-faithful mechanisms.
+
+---
+
+# v7.3.0 — Quick-Decision Cycle (field report)
+
+Field report: *"The goal with the 'blacklist' was to stop the annoying popup
+on sites I already know I want to spoof by default but that does not seem to
+be working. The popup action itself is the undesirable part… When I wrote
+the userscript I had convenience of selecting to deny or authorize a wss://
+or ws:// connection that much more conveniently or quickly. If that can also
+be implemented at the app level that would be ideal."*
+
+Root-cause analysis identified six compounding defects (G-85…G-89, G-96);
+one of them (G-85) reproduces the report exactly: the user blacklisted sites
+through the userscript's menus while the extension governed the page — the
+edit landed in GM-local storage, the extension never learned of it, and its
+prompt kept firing.
+
+## P0 — Field-report root causes
+
+| Gap | Resolution |
+|-----|------------|
+| G-85 Split-brain policy stores: on extension-governed pages the helper userscript's Whitelist/Blacklist menu commands wrote GM-local lists only — the extension never learned, so its prompt persisted (the exact reported symptom) | **Policy bridge**: the userscript now posts a `policyRequest` window message; `ghost_bridge.js` answers with a CONFIRM bar (3lectric-Glass, `isTrusted`-gated) and only a genuine click writes the REAL extension list over the internal channel. Local GM lists stay intact for standalone pages; the HUD explains the routing. |
+| G-86 `prompt.js` computed the BLACKLIST grant from the *WS endpoint host* (`new URL(reqUrl).hostname`), not the page origin — one grant covered a single endpoint, every other endpoint/SW on the site re-prompted | Remembered grants are **site-scoped by default**: `remember:'site'` keys the page-origin host. Endpoint granularity remains available via the Quick Bar's scope selector and the popup's per-attempt buttons. The v7.2 button's deny+blacklist settlement semantics are preserved (now site-scoped). |
+| G-87 `normalizeDomain` only lowercased + stripped punycode markers — an entry like `https://example.com/` NEVER matched a hostname (the userscript already normalized correctly; pasted URLs silently no-oped) | Robust normalization: scheme, protocol-relative slashes, path, query, fragment, port and boundary dots are stripped; bare domains normalize identically to v7.2 (superset). |
+| G-88 No silent auto-spoof list existed — the user's "sites I spoof by default" had no surface; v7.2 offered only allow-list and kill-list | **Spooflist** (`chrome.storage.sync` key + cached registry + gate step 2.5 + GM sibling key in the userscript): spooflisted targets/origins settle `action:'spoof'` with NO interactive decision — pacified sockets, zero prompts. |
+| G-89 The prompt was a focus-stealing OS window (`chrome.windows.create` `focused:true`) — the intrusive part of the report — and the dedup key included the full URL, so token-bearing sockets (`wss://host/ws?token=…`) were distinct every load | **In-page Quick Bar** (default surface): bottom-right 3lectric-Glass bar in a closed shadow root, one click / one key, 30 s auto-deny countdown, no OS focus stealing. Dedup canon is now `scheme://host:port/path` (query/fragment stripped). The prompt window is preserved verbatim as fallback and as the explicit `promptMode:'window'` preference. |
+
+## P1 — Three-way action model
+
+| Gap | Resolution |
+|-----|------------|
+| G-90 The gate protocol was boolean — there was no way to express "pacify" at the extension level; DENY killed sockets, and sites that hard-require a live socket nag, retry or fall back to noisier channels | **AUTHORIZE / SPOOF / DENY** actions end-to-end: gate responses carry `action`; `resolvePermission` settles with an action; the Ghost Core's phantom pacifies on `spoof` (CONNECTING→OPEN at the 40 ms cadence, synthetic open, sends swallowed silently, `bufferedAmount` 0, `close()` honored with a clean code-1000 close) and preserves v7.2's error+close denial verbatim on `deny`. |
+| G-91 SharedWorker semantics for the new action were undefined | Doctrine fixed and mirrored in both components: both `deny` and `spoof` keep the baseline SecurityError (MessagePort-surface pacification out of scope; documented in code and README). |
+| G-92 Settlement protocol had no forward-compatible shape | New shape `{decision:'allow'\|'spoof'\|'deny', remember, domain}` with full v7.2 backward compatibility: `{allowed, blacklist:true, domain}` still settles AND blacklists; boolean-only messages coerce to allow/deny. The decision key is deliberately named `decision` — `action` is the router's dispatch key, and a duplicate-key collision there would silently misroute the settlement (the harness caught exactly this during development: 11 red → fixed in background, bridge and prompt before release). |
+
+## P1 — Quick Bar security & lifecycle
+
+| Gap | Resolution |
+|-----|------------|
+| G-93 An in-page decision UI rendered in the MAIN world would be forgeable (the page could synthesize its own AUTHORIZE click) | The Quick Bar is rendered by `ghost_bridge.js` in the ISOLATED world (extension code): closed shadow root, every handler rejects `isTrusted === false` events, and settlement travels over the INTERNAL `chrome.runtime` channel — the external channel still rejects `resolvePermission`. A page cannot press its own authorize button. |
+| G-94 An in-page bar that failed to render would hang the gate until the 120 s last-resort timeout | Synchronous render acknowledgment (`{status:'shown'}`); on miss (no DOM, frame gone, queue full) the background falls back to the v7.2 prompt window within 1.6 s. Cross-surface settlements dispatch `ghostQuickDismiss` so a superseded bar always leaves the screen. |
+| G-95 The policy bridge's request surface is page-forgeable — a hostile page could spam CONFIRM bars | Contained: session cap (6), minimum show interval (1.5 s), queue cap (2), 12 s auto-IGNORE, `isTrusted`-gated CONFIRM, and kind whitelist (`whitelist`/`spooflist`/`blacklist`/`reset`/`toggle` only). Timeout NEVER confirms. |
+
+## P2 — App-level convenience (the explicit request)
+
+| Gap | Resolution |
+|-----|------------|
+| G-96 No fast authorize/deny at the app level — the convenience the user praised in their original userscript existed only in Tampermonkey menus | The Quick Bar (in-page, one key) + the toolbar popup's **CURRENT SITE panel** (live policy badges + one-click AUTHORIZE / SPOOF / BLOCK / ASK AGAIN via `getSitePolicy`/`removeDomain`) + per-attempt SPOOF buttons join ALLOW/BLOCK. |
+| G-97 No spooflist management surface in the popup | Spooflist textarea (SAVE/CLEAR, failure-surfaced status), amber-accented 3lectric-Glass controls, live badge, HUD row, userscript menu pair (add + edit + clear). |
+| G-98 The prompt window had no keyboard path | A/S/D + Enter (authorize, the v7.2 default-focus doctrine) + Esc (deny) in both the prompt window and the Quick Bar, with hint legends. |
+| G-99 No user preference for the decision surface | `promptMode` sync setting (`inline` default / `window`), segmented control in the popup, TTL-cached in the background, storage-reactive. |
+
+## Version unification
+
+| Gap | Resolution |
+|-----|------------|
+| G-100 Version fragmentation across the suite after the v7.2.0 release | Unified bump to **7.3.0**: manifest, README badge, both userscripts, every file header, popup subtitle + version chip, HUD subtitle. |
+
+**Validation:** all files pass `node --check`; the manifest parses with a
+130-character description (≤132 bound). Behavioral harness extended and
+re-run: the full v7.2.0 matrix (gate order incl. blacklist-before-toggle and
+blacklist-before-whitelist, mutual exclusion both directions, prompt-blacklist
+settlement, external-channel forgery rejection, rate limits, telemetry bounds,
+dead-port isolation, tab-close eviction, storage invalidation) — plus the
+v7.3.0 matrix: spooflist gate position (after blacklist, before toggle),
+action propagation (allow/spoof/deny) through gate responses and
+settlements, site-scope grant computation, v7.2 settlement-shape
+compatibility, three-way mutual exclusion, removeDomain, getSitePolicy,
+promptMode dispatch with window fallback, query-stripped dedup, robust
+normalization (schemes/paths/ports/boundary dots), Quick-Bar dismiss on
+external settlement, and the userscript's spooflist decide matrix, pacified
+phantom (open cadence, swallowed sends, clean close) and policyRequest
+emission. GUP v5.3.1 proof chain executed against the v7.2.0 baseline
+(`264fa5b`): atomization + SHA-256 unit comparison, per-unit semantic
+superset verdicts, bidirectional alignment, inventory, and the mandatory
+validation gate. See the GUP evidence bundle.
+
+**Baseline behaviors intentionally preserved (superset verification set,
+v7.2.0 → v7.3.0): the full v7.2.0 set above, plus** the v7.2.0 blacklist
+doctrine (absolute, pre-toggle, mutually exclusive), the prompt window path
+(now fallback + preference, behavior verbatim), the v7.2 settlement message
+shape, the deny-cadence phantom (error+close at 40 ms), ghostStatus flags
+(additive), the helper userscript's GM key set (additive sibling for the
+spooflist) and its deferral doctrine — with the policy bridge as the only
+crossing between the two stores, gated by a genuine click.

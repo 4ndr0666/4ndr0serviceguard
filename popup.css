@@ -1,4 +1,4 @@
-/* popup.css — 4NDR0666 ServiceGuard v7.2.0
+/* popup.css — 4NDR0666 ServiceGuard v7.3.0
    3lectric-Glass paradigm (4NDR0666OS UI/UX specification), translated from
    the GTK3/Cairo payload to web CSS for the extension control surface.
    - Palette (spec 2.1): Matrix Deep Base rgba(10,19,26) at the spec glass
@@ -346,4 +346,106 @@ input:checked + .slider:before { transform: translateX(20px); }
   color: var(--text-dim);
   letter-spacing: 1px;
   flex-shrink: 0;
+}
+
+/* === v7.3.0: CURRENT SITE quick-action panel === */
+.site-panel {
+  padding: 10px;
+  background: var(--glass-level-2);
+  border: 1px solid var(--border-cyan-glass);
+  border-radius: 4px;
+}
+
+.site-origin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  min-height: 34px;
+}
+
+.site-origin-text {
+  font-size: 12px;
+  color: var(--text-cyan-active);
+  word-break: break-all;
+}
+
+.site-badges {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.badge {
+  font-size: 8px;
+  letter-spacing: 1px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-cyan-idle);
+  background: var(--glass-level-3);
+  color: var(--accent-cyan);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.badge.ok { border-color: var(--accent-cyan); color: var(--text-cyan-active); }
+
+.badge.spoof {
+  border-color: rgba(255, 170, 0, 0.5);
+  color: #ffaa00;
+}
+
+.badge.blocked {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+
+.badge.ask {
+  border-color: var(--border-cyan-faint);
+  color: var(--text-dim);
+}
+
+/* === v7.3.0: decision-surface segmented control === */
+.mode-row {
+  display: flex;
+  gap: 8px;
+}
+
+.mode-row .hud-button { flex: 1; }
+
+.hud-button.mode-btn { padding: 8px 0; font-size: 0.7rem; }
+
+.hud-button.mode-btn.on {
+  color: var(--text-cyan-active);
+  background: var(--cyan-wash-active);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 15px var(--glow-cyan-strong);
+}
+
+/* === v7.3.0: SPOOF control surfaces (amber accent for the pacifier) === */
+.section-label.spoof-label { color: #ffaa00; }
+
+.hud-button.spoof-btn {
+  border-color: rgba(255, 170, 0, 0.55);
+  color: #ffaa00;
+}
+
+.hud-button.spoof-btn:hover {
+  background: rgba(255, 170, 0, 0.2);
+  border-color: #ffaa00;
+  box-shadow: 0 0 20px rgba(255, 170, 0, 0.45);
+  color: #ffd27a;
+}
+
+.hud-button.spoof-btn:active {
+  background: rgba(255, 170, 0, 0.3);
+  color: var(--absolute-light);
+}
+
+.glass-textarea.spoof-textarea { border-color: rgba(255, 170, 0, 0.4); }
+
+.glass-textarea.spoof-textarea:focus {
+  border-color: #ffaa00;
+  box-shadow: 0 0 15px rgba(255, 170, 0, 0.35);
 }

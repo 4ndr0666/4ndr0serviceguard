@@ -24,7 +24,25 @@
       </div>
       <div class="header-text">
         <div class="title">4NDR0666</div>
-        <div class="subtitle">GHOST PROTOCOL v7.2</div>
+        <div class="subtitle">GHOST PROTOCOL v7.3</div>
+      </div>
+    </div>
+
+    <!-- Current Site (v7.3.0: one-click authorize/spoof/block — the app-level
+         quick-decision surface) -->
+    <div class="section site-panel">
+      <div class="section-label">CURRENT SITE</div>
+      <div class="site-origin glass-subpanel">
+        <span id="siteOrigin" class="site-origin-text">—</span>
+        <span id="siteBadges" class="site-badges"></span>
+      </div>
+      <div class="action-row">
+        <button class="hud-button" id="siteAuthorize">AUTHORIZE</button>
+        <button class="hud-button spoof-btn" id="siteSpoof">SPOOF</button>
+        <button class="hud-button destructive" id="siteBlock">BLOCK</button>
+      </div>
+      <div class="action-row">
+        <button class="hud-button small" id="siteReset">ASK AGAIN (REMOVE SITE RULES)</button>
       </div>
     </div>
 
@@ -37,6 +55,15 @@
           <span class="slider"></span>
         </label>
         <span id="toggleLabel" class="toggle-label">ACTIVE — DEFAULT DENY</span>
+      </div>
+    </div>
+
+    <!-- Decision Surface (v7.3.0) -->
+    <div class="section">
+      <div class="section-label">DECISION SURFACE</div>
+      <div class="mode-row">
+        <button class="hud-button mode-btn on" id="modeInline">INLINE BAR (IN-PAGE)</button>
+        <button class="hud-button mode-btn" id="modeWindow">PROMPT WINDOW</button>
       </div>
     </div>
 
@@ -55,11 +82,21 @@
 
     <!-- Whitelist -->
     <div class="section">
-      <div class="section-label">WHITELIST (ONE PER LINE)</div>
+      <div class="section-label">WHITELIST — AUTHORIZE (ONE PER LINE)</div>
       <textarea id="whitelistInput" class="glass-textarea" placeholder="example.com&#10;app.example.com" spellcheck="false"></textarea>
       <div class="action-row">
         <button class="hud-button" id="saveWhitelist">SAVE &amp; APPLY</button>
         <button class="hud-button" id="clearWhitelist">CLEAR</button>
+      </div>
+    </div>
+
+    <!-- Spooflist (v7.3.0) -->
+    <div class="section">
+      <div class="section-label spoof-label">SPOOFLIST — AUTO-SPOOF, NEVER ASK (ONE PER LINE)</div>
+      <textarea id="spooflistInput" class="glass-textarea spoof-textarea" placeholder="news.example&#10;chat.example.com" spellcheck="false"></textarea>
+      <div class="action-row">
+        <button class="hud-button spoof-btn" id="saveSpooflist">SAVE &amp; APPLY</button>
+        <button class="hud-button spoof-btn" id="clearSpooflist">CLEAR</button>
       </div>
     </div>
 
@@ -76,7 +113,7 @@
     <!-- Footer -->
     <div class="footer">
       <div class="status-text" id="statusText">Ready</div>
-      <span class="version-chip">v7.2.0</span>
+      <span class="version-chip">v7.3.0</span>
       <button class="hud-button small" id="openTriMode">OPEN IN TRI-MODE</button>
     </div>
   </div>
