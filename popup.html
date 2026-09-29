@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="popup.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@700&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="glass-panel main-popup">
@@ -24,7 +24,7 @@
       </div>
       <div class="header-text">
         <div class="title">4NDR0666</div>
-        <div class="subtitle">GHOST PROTOCOL v7</div>
+        <div class="subtitle">GHOST PROTOCOL v7.2</div>
       </div>
     </div>
 
@@ -63,9 +63,20 @@
       </div>
     </div>
 
+    <!-- Blacklist (v7.2.0) -->
+    <div class="section">
+      <div class="section-label destructive-label">BLACKLIST — HARD DENY (ONE PER LINE)</div>
+      <textarea id="blacklistInput" class="glass-textarea destructive-textarea" placeholder="tracker.example&#10;ads.example.com" spellcheck="false"></textarea>
+      <div class="action-row">
+        <button class="hud-button destructive" id="saveBlacklist">SAVE &amp; APPLY</button>
+        <button class="hud-button destructive" id="clearBlacklist">CLEAR</button>
+      </div>
+    </div>
+
     <!-- Footer -->
     <div class="footer">
       <div class="status-text" id="statusText">Ready</div>
+      <span class="version-chip">v7.2.0</span>
       <button class="hud-button small" id="openTriMode">OPEN IN TRI-MODE</button>
     </div>
   </div>

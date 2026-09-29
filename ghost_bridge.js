@@ -1,4 +1,4 @@
-// ghost_bridge.js — 4ndr0serviceguard Bootstrap Bridge v7.1 (ISOLATED world)
+// ghost_bridge.js — 4ndr0serviceguard Bootstrap Bridge v7.2 (ISOLATED world)
 // Single responsibility: publish the extension ID into the DOM at document_start
 // so the MAIN-world Ghost Core (which has no access to chrome.* APIs) can address
 // the background service worker through the externally_connectable messaging

@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="prompt.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@700&family=Cinzel+Decorative:wght@700&display=swap" rel="stylesheet">
 </head>
 <body>
   <div class="glass-panel alert-box">
@@ -43,6 +43,10 @@
     <div class="actions">
       <button id="btn-deny" class="hud-button">DENY (SPOOF)</button>
       <button id="btn-allow" class="hud-button active">AUTHORIZE</button>
+    </div>
+    <div class="actions secondary">
+      <!-- v7.2.0: deny this attempt AND permanently blacklist the domain -->
+      <button id="btn-blacklist" class="hud-button destructive">BLACKLIST DOMAIN</button>
     </div>
   </div>
 

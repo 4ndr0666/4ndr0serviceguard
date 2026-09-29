@@ -1,4 +1,4 @@
-// ghost_core_v7.js — 4ndr0serviceguard Ghost Core v7.1 (MAIN world)
+// ghost_core_v7.js — 4ndr0serviceguard Ghost Core v7.2 (MAIN world)
 //
 // Paradigm (D1): Proxy-based interception facade — single paradigm, no chimera.
 //   navigator.serviceWorker                       → memoized phantom container
@@ -19,6 +19,10 @@
 //   - unregister of pre-existing Service Workers + CacheStorage clearing
 //   - whitelist / master-toggle enforcement via a working IPC channel
 //   - identity-stable container, functional event target, live WS forwarding
+// v7.2.0: blacklist-aware ghost status. ghostStatus now also reports whether
+//   the page origin is blacklisted; a blacklisted origin stays guarded even
+//   when the master toggle is off or the origin is whitelisted (the blacklist
+//   is an absolute prohibition — the background gate enforces the same order).
 
 (function () {
   'use strict';
@@ -276,7 +280,10 @@
       }
       const enabled = status.active !== false;
       const whitelisted = status.whitelisted === true;
-      ghostActiveForOrigin = enabled && !whitelisted;
+      // v7.2.0: blacklist is absolute — a blacklisted origin stays guarded
+      // even when the master toggle is off or the origin is whitelisted.
+      const blacklisted = status.blacklisted === true;
+      ghostActiveForOrigin = (enabled && !whitelisted) || blacklisted;
       if (ghostActiveForOrigin) purgeExistingWorkers();
     });
   }
@@ -313,6 +320,19 @@
   const fakeContainer = {};
   const containerEt = makeEventTarget(fakeContainer);
   tag(fakeContainer, 'ServiceWorkerContainer');
+  // v7.2.0: constructor fidelity — native containers report
+  // ServiceWorkerContainer as their constructor. Matching it removes an
+  // identity-detection vector and keeps layered companions (the helper
+  // userscript capturing the container second) from resolving the
+  // container's prototype to Object.prototype.
+  if (realSW && realSW.constructor) {
+    Object.defineProperty(fakeContainer, 'constructor', {
+      value: realSW.constructor,
+      configurable: true,
+      enumerable: false,
+      writable: true
+    });
+  }
   let fakeReadyPromise = null;
 
   if (realSW) {

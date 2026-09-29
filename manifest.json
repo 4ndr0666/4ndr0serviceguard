@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "4ndr0serviceguard",
   "short_name": "4ndr0guard",
-  "version": "7.1.1",
-  "description": "Ghost Protocol v7: Stealth Service Worker, WebSocket & SharedWorker firewall with purge-on-load, live approval UI and enforced whitelist.",
+  "version": "7.2.0",
+  "description": "Ghost Protocol v7: stealth SW/WebSocket/SharedWorker firewall — purge-on-load, live approval UI, whitelist + blacklist.",
   "minimum_chrome_version": "111",
   "permissions": [
     "storage",
@@ -36,7 +36,8 @@
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
-      "48": "icons/icon48.png"
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
   "icons": {

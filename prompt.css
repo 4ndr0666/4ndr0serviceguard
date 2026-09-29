@@ -1,23 +1,48 @@
+/* prompt.css — 4ndr0serviceguard Gatekeeper Prompt v7.2.0
+   3lectric-Glass paradigm (4NDR0666OS UI/UX specification) translated to web
+   CSS: Matrix Deep Base rgba(10,19,26) at spec glass levels, Electric Cyan
+   #00E5FF, Secondary #67E8F9, Destructive #ff0055 (the BLACKLIST control),
+   JetBrains Mono system font, Orbitron display title, Cinzel Decorative for
+   the Ψ glyph only, 150ms ease-in-out transitions, rectangular brutalist
+   buttons (radius 0), 4px glass panel geometry. */
+
 :root {
-  --bg-dark-base: #050A0F;
-  --bg-glass-panel: rgba(10, 19, 26, 0.35);
+  /* Base palette (spec 2.1) */
+  --matrix-deep-base: rgb(10, 19, 26);
+  --glass-level-1: rgba(10, 19, 26, 0.72);
+  --glass-level-2: rgba(10, 19, 26, 0.65);   /* ephemeral overlay background */
+  --glass-level-3: rgba(10, 19, 26, 0.55);
+  --solid-header: rgba(10, 19, 26, 0.95);
   --accent-cyan: #00E5FF;
   --text-cyan-active: #67E8F9;
-  --accent-cyan-border-idle: rgba(0, 229, 255, 0.25);
-  --accent-cyan-border-hover: rgba(0, 229, 255, 0.6);
-  --accent-cyan-bg-active: rgba(0, 229, 255, 0.15);
-  --glow-cyan-active: rgba(0, 229, 255, 0.45);
-  --edge-light-top: rgba(255, 255, 255, 0.12);
-  --edge-light-left: rgba(255, 255, 255, 0.12);
-  --text-primary: #EAEAEA;
-  --text-secondary: #9E9E9E;
-  --font-body: 'Roboto Mono', monospace;
+  --destructive: #ff0055;
+  --absolute-light: #ffffff;
+
+  /* Derived tokens (spec 4.x alphas) */
+  --border-cyan-faint: rgba(0, 229, 255, 0.2);
+  --border-cyan-glass: rgba(0, 229, 255, 0.3);
+  --border-cyan-idle: rgba(0, 229, 255, 0.4);
+  --border-cyan-hover: rgba(0, 229, 255, 0.5);
+  --cyan-wash-hover: rgba(0, 229, 255, 0.2);
+  --cyan-wash-active: rgba(0, 229, 255, 0.3);
+  --glow-cyan: rgba(0, 229, 255, 0.15);
+  --glow-cyan-strong: rgba(0, 229, 255, 0.5);
+  --subtitle-cyan: rgba(0, 229, 255, 0.7);
+  --text-primary: #00E5FF;
+  --text-secondary: rgba(0, 229, 255, 0.7);
+  --text-dim: rgba(0, 229, 255, 0.55);
+  --alert-value: #ffaa00;
+
+  /* Typography (spec 3.0) */
+  --font-body: 'JetBrains Mono', monospace;
+  --font-display: 'Orbitron', sans-serif;
+  --font-glyph: 'Cinzel Decorative', serif;
 }
 
 body {
   margin: 0;
   padding: 10px;
-  background: var(--bg-dark-base);
+  background: var(--matrix-deep-base);
   color: var(--text-primary);
   font-family: var(--font-body);
   display: flex;
@@ -27,51 +52,58 @@ body {
   box-sizing: border-box;
 }
 
+/* Ephemeral popover surface (spec 4.7) — Glass Level 2 */
 .glass-panel {
-  background: var(--bg-glass-panel);
-  border: 1px solid var(--accent-cyan-border-idle);
-  border-top: 1px solid var(--edge-light-top);
-  border-left: 1px solid var(--edge-light-left);
-  border-radius: 8px;
+  background: var(--glass-level-2);
+  border: 1px solid var(--border-cyan-glass);
+  border-radius: 4px;
+  box-shadow: 0 0 20px var(--glow-cyan);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
   padding: 18px;
   width: 100%;
   max-width: 360px;
 }
 
+/* Headerbar (spec 4.3) */
 .hud-header {
   display: flex;
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--accent-cyan-border-idle);
+  padding: 10px;
+  margin: -18px -18px 16px -18px; /* bleed to the panel edges */
+  background: var(--solid-header);
+  border-bottom: 2px solid var(--accent-cyan);
+  border-radius: 4px 4px 0 0;
 }
 
-.glyph-container { width: 38px; height: 38px; }
+.glyph-container { width: 38px; height: 38px; flex-shrink: 0; }
+.glyph-container svg { width: 100%; height: 100%; display: block; }
 
 .header-text .title {
-  font-family: 'Cinzel Decorative', serif;
+  font-family: var(--font-display);     /* Orbitron, 700 (spec 4.3) */
   font-size: 16px;
-  color: var(--accent-cyan);
+  font-weight: 700;
+  color: var(--text-cyan-active);
   letter-spacing: 1px;
 }
 
 .header-text .subtitle {
+  font-family: var(--font-body);
   font-size: 10px;
-  color: var(--text-secondary);
+  color: var(--subtitle-cyan);
   letter-spacing: 1.5px;
 }
 
+/* Data rows */
 .data-row {
   margin-bottom: 10px;
   font-size: 13px;
 }
 
 .label {
-  color: var(--text-secondary);
+  color: var(--subtitle-cyan);
   display: inline-block;
   width: 58px;
   text-transform: uppercase;
@@ -83,42 +115,75 @@ body {
   word-break: break-all;
 }
 
-.url-value { color: #ffaa00; }
+.url-value { color: var(--alert-value); }
 
+/* Action surfaces */
 .actions {
   display: flex;
   gap: 10px;
-  margin-top: 18px;
+  margin-top: 14px;
 }
 
-/* HUD Buttons from spec */
+.actions.secondary { margin-top: 8px; }
+
+/* Standard control surfaces (spec 4.4) */
 .hud-button {
   flex: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 10px 0;
-  border: 1px solid transparent;
+  background: var(--glass-level-2);
+  border: 1px solid var(--border-cyan-idle);
+  border-radius: 0;                    /* strict rectangular brutalism */
   font-family: var(--font-body);
-  font-weight: 500;
-  font-size: 0.875rem;
+  font-weight: bold;
+  font-size: 0.8rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-secondary);
-  background-color: rgba(0, 0, 0, 0.35);
+  color: var(--accent-cyan);
   cursor: pointer;
-  transition: all 300ms ease-in-out;
+  transition: all 150ms ease-in-out;
 }
 
 .hud-button:hover {
-  color: var(--accent-cyan);
-  border-color: var(--accent-cyan-border-hover);
-  background-color: var(--accent-cyan-bg-hover);
+  background: var(--cyan-wash-hover);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 20px var(--glow-cyan-strong);
+  color: var(--text-cyan-active);
+}
+
+.hud-button:active {
+  background: var(--cyan-wash-active);
+  color: var(--absolute-light);
+}
+
+.hud-button:focus-visible {
+  outline: 1px solid var(--text-cyan-active);
+  outline-offset: 1px;
 }
 
 .hud-button.active {
   color: var(--text-cyan-active);
-  background-color: var(--accent-cyan-bg-active);
+  background: var(--cyan-wash-active);
   border-color: var(--accent-cyan);
-  box-shadow: 0 0 15px var(--glow-cyan-active);
+  box-shadow: 0 0 15px var(--glow-cyan-strong);
+}
+
+/* Destructive control surfaces (spec 4.5) — BLACKLIST DOMAIN */
+.hud-button.destructive {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+
+.hud-button.destructive:hover {
+  background: rgba(255, 0, 85, 0.3);
+  border-color: var(--destructive);
+  box-shadow: 0 0 25px var(--destructive);
+  color: var(--absolute-light);
+}
+
+.hud-button.destructive:active {
+  background: rgba(255, 0, 85, 0.4);
+  color: var(--absolute-light);
 }

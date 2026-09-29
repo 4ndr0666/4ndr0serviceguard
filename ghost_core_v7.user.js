@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         4ndr0serviceguard — Ghost Core Companion
 // @namespace    https://github.com/4ndr0666/4ndr0serviceguard
-// @version      7.1.0
+// @version      7.2.0
 // @description  Stealth Service Worker firewall for userscript managers. Rejects new registrations by returning realistic fake registration objects, unregisters pre-existing Service Workers and clears CacheStorage. Techniques per https://www.bugbugnow.net/2020/03/Reject-to-register-a-ServiceWorker.html. Use the @exclude lines below as your whitelist.
 // @author       4ndr0666
 // @license      MIT

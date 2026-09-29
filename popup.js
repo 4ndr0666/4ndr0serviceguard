@@ -1,20 +1,26 @@
-// popup.js — 4NDR0666 ServiceGuard v7.1.1 (Electric-Glass Control Surface)
+// popup.js — 4NDR0666 ServiceGuard v7.2.0 (3lectric-Glass Control Surface)
 // Wired to the Ψ-Core router: action-keyed messages, canonical sync storage,
 // live blocked attempts via storage listener + getLogs, one-click domain
-// approval, XSS-safe DOM rendering, and a functional tri-mode data pipe.
+// approval AND blacklisting, XSS-safe DOM rendering, and a functional
+// tri-mode data pipe.
 // v7.1.1: every chrome callback reads runtime.lastError (no unchecked-error
 // noise) and every send() result surfaces failures instead of fake success.
+// v7.2.0: blacklist management (textarea + setBlacklist IPC), per-item BLOCK
+// buttons alongside ALLOW, and blacklist bootstrap from canonical storage.
 
 document.addEventListener('DOMContentLoaded', () => {
   const masterToggle = document.getElementById('masterToggle');
   const toggleLabel = document.getElementById('toggleLabel');
   const whitelistInput = document.getElementById('whitelistInput');
+  const blacklistInput = document.getElementById('blacklistInput');
   const blockedList = document.getElementById('blockedList');
   const statusText = document.getElementById('statusText');
   const refreshBlocked = document.getElementById('refreshBlocked');
   const allowAllCurrent = document.getElementById('allowAllCurrent');
   const saveWhitelist = document.getElementById('saveWhitelist');
   const clearWhitelist = document.getElementById('clearWhitelist');
+  const saveBlacklist = document.getElementById('saveBlacklist');
+  const clearBlacklist = document.getElementById('clearBlacklist');
   const openTriMode = document.getElementById('openTriMode');
 
   const TRI_MODE_URL = 'https://sm1therz.github.io/apps/html-tidy/tri-mode';
@@ -46,13 +52,16 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // --- state bootstrap (canonical: chrome.storage.sync) ---
-  chrome.storage.sync.get(['enabled', 'whitelist'], (result) => {
+  chrome.storage.sync.get(['enabled', 'whitelist', 'blacklist'], (result) => {
     void chrome.runtime.lastError; // read to suppress unchecked-error noise
     result = result || {};
     masterToggle.checked = result.enabled !== false;
     updateToggleLabel();
     if (typeof result.whitelist === 'string') {
       whitelistInput.value = result.whitelist;
+    }
+    if (typeof result.blacklist === 'string') {
+      blacklistInput.value = result.blacklist;
     }
   });
 
@@ -125,8 +134,20 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.title = 'No domain to whitelist';
       }
 
+      // v7.2.0: one-click permanent prohibition for the attempt's domain.
+      const blockBtn = document.createElement('button');
+      blockBtn.className = 'hud-button small block-btn destructive';
+      blockBtn.dataset.target = target;
+      blockBtn.dataset.domain = host;
+      blockBtn.textContent = 'BLOCK';
+      if (!host) {
+        blockBtn.disabled = true;
+        blockBtn.title = 'No domain to blacklist';
+      }
+
       div.appendChild(scope);
       div.appendChild(btn);
+      div.appendChild(blockBtn);
       blockedList.appendChild(div);
     });
   }
@@ -138,20 +159,23 @@ document.addEventListener('DOMContentLoaded', () => {
     blockedList.appendChild(empty);
   }
 
-  // Event delegation — one listener for every allow button.
+  // Event delegation — one listener for every allow/block button.
   blockedList.addEventListener('click', (e) => {
-    const btn = e.target && e.target.closest ? e.target.closest('.allow-btn') : null;
+    const btn = e.target && e.target.closest ? e.target.closest('.allow-btn, .block-btn') : null;
     if (!btn || btn.disabled) return;
     const domain = btn.dataset.domain;
     if (!domain) return;
-    send('addWhitelist', { domain: domain }).then((r) => {
+    const isBlock = btn.classList.contains('block-btn');
+    send(isBlock ? 'addBlacklist' : 'addWhitelist', { domain: domain }).then((r) => {
       if (!r || r.status === 'error') {
-        setStatus('Whitelist add failed — service worker busy, retry');
+        setStatus((isBlock ? 'Blacklist' : 'Whitelist') + ' add failed — service worker busy, retry');
         return;
       }
-      btn.textContent = (r && r.status === 'exists') ? 'TRUSTED' : 'ALLOWED';
+      btn.textContent = (r && r.status === 'exists')
+        ? (isBlock ? 'LISTED' : 'TRUSTED')
+        : (isBlock ? 'BLOCKED' : 'ALLOWED');
       btn.disabled = true;
-      setStatus('Domain added to whitelist — reload page');
+      setStatus('Domain ' + (isBlock ? 'blacklisted' : 'whitelisted') + ' — reload page');
     });
   });
 
@@ -202,6 +226,27 @@ document.addEventListener('DOMContentLoaded', () => {
       setStatus((!r || r.status === 'error')
         ? 'Whitelist clear failed — retry'
         : 'Whitelist cleared');
+    });
+  });
+
+  // --- blacklist management (v7.2.0; canonical sync string) ---
+  saveBlacklist.addEventListener('click', () => {
+    const lines = blacklistInput.value.split('\n')
+      .map((l) => l.trim().toLowerCase())
+      .filter(Boolean);
+    send('setBlacklist', { blacklist: lines }).then((r) => {
+      setStatus((!r || r.status === 'error')
+        ? 'Blacklist save failed — retry (storage quota or sync write limit)'
+        : 'Blacklist saved (' + lines.length + ' domains)');
+    });
+  });
+
+  clearBlacklist.addEventListener('click', () => {
+    blacklistInput.value = '';
+    send('setBlacklist', { blacklist: [] }).then((r) => {
+      setStatus((!r || r.status === 'error')
+        ? 'Blacklist clear failed — retry'
+        : 'Blacklist cleared');
     });
   });
 

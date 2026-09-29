@@ -1,4 +1,4 @@
-// background.js — 4ndr0serviceguard Ψ-Core v7.1.1 (Background Service Worker)
+// background.js — 4ndr0serviceguard Ψ-Core v7.2.0 (Background Service Worker)
 //
 // Unified command & control router. Two channels:
 //   chrome.runtime.onMessage        → internal extension pages (popup, prompt)
@@ -6,8 +6,9 @@
 //                                      externally_connectable page stub
 //
 // Enforcement order for every gate request:
-//   1. per-tab rate limit   2. master toggle   3. DDoS-Guard fast path
-//   4. whitelist auto-allow 5. interactive prompt (deduped, capped, settled)
+//   1. per-tab rate limit   2. blacklist hard-deny   3. master toggle
+//   4. DDoS-Guard fast path 5. whitelist auto-allow  6. interactive prompt
+//   (deduped, capped, settled)
 //
 // Superset contract over the v7.0 baseline: whitelist auto-allow, toggle
 // enforcement, DDoS-Guard auto-allow, prompt.html interactive flow, addWhitelist
@@ -15,6 +16,17 @@
 // bound are all preserved; broken paths (the restore injection into whitelisted
 // tabs, the dead 'enabled' flag, schema-mismatched telemetry) are replaced by
 // working equivalents with identical intent. See MITIGATION_LOG.md.
+//
+// v7.2.0: blacklist support. A blacklist entry is an explicit user
+// prohibition: it is evaluated before the master toggle and before every
+// allow path, so a blacklisted target or page origin is denied absolutely —
+// even in pass-through mode and even if it also appears on the whitelist.
+// Lists are mutually exclusive on single-domain adds (addWhitelist prunes
+// the conflicting blacklist entry and vice versa); bulk saves replace one
+// list without touching the other, and the gate resolves blacklist before
+// whitelist so a dual entry (only possible via bulk edits) always denies.
+// The interactive prompt can now settle a denial AND blacklist the prompted
+// domain in one action (resolvePermission's optional blacklist grant).
 //
 // v7.1.1 hardening (field report: background.js:505 — the D6 boundary was
 // logging a real rejection): response delivery is now failure-isolated
@@ -32,6 +44,9 @@ const MAX_PROMPTS_PER_TAB = 3;    // concurrent interactive prompts per tab
 
 let whitelistCache = new Map();
 let cacheExpiry = 0;
+
+let blacklistCache = new Map();   // v7.2.0: explicit-prohibition registry
+let blacklistExpiry = 0;
 
 let storageQueue = Promise.resolve(); // serializes read-modify-write cycles
 
@@ -147,6 +162,38 @@ async function isWhitelisted(url, base) {
   }
 }
 
+// v7.2.0: blacklist registry — same TTL/cache/storage discipline as the
+// whitelist. A read failure falls open here, but the gate's default is still
+// deny (prompt), so a storage hiccup can never silently allow a connection.
+async function getBlacklist() {
+  const now = Date.now();
+  if (now - blacklistExpiry > CACHE_REFRESH_MS) {
+    try {
+      const result = await chrome.storage.sync.get(['blacklist']);
+      const lines = (result.blacklist || '').split('\n').map((l) => l.trim().toLowerCase()).filter(Boolean);
+      blacklistCache.clear();
+      lines.forEach((line) => blacklistCache.set(normalizeDomain(line), true));
+      blacklistExpiry = now;
+    } catch (e) {
+      console.error('[Ψ-Core] Blacklist sync failed:', e);
+    }
+  }
+  return Array.from(blacklistCache.keys());
+}
+
+async function isBlacklisted(url, base) {
+  try {
+    const u = resolveUrl(url, base);
+    if (!u) return false;
+    const domain = normalizeDomain(u.hostname);
+    const lines = await getBlacklist();
+    return lines.some((line) => domain === line || domain.endsWith('.' + line));
+  } catch (e) {
+    console.debug('[Ψ-Core] blacklist evaluation failed:', e);
+    return false;
+  }
+}
+
 async function applyIcon(enabled) {
   const path = enabled
     ? { 16: 'icons/icon16.png', 48: 'icons/icon48.png', 128: 'icons/icon128.png' }
@@ -238,14 +285,51 @@ async function handleToggle(request) {
 }
 
 async function handleAddWhitelist(request) {
-  const result = await chrome.storage.sync.get(['whitelist']);
+  const result = await chrome.storage.sync.get(['whitelist', 'blacklist']);
   // v7.1.1: normalize stored lines so mixed-case entries dedupe correctly.
+  // v7.2.0: single-domain adds keep the lists mutually exclusive — adding to
+  // the whitelist prunes any conflicting blacklist entry (and vice versa).
   const lines = (result.whitelist || '').split('\n').map((l) => normalizeDomain(l)).filter(Boolean);
+  const blLines = (result.blacklist || '').split('\n').map((l) => normalizeDomain(l)).filter(Boolean);
   const targetDomain = normalizeDomain(request.domain);
-  if (targetDomain && !lines.includes(targetDomain)) {
-    lines.push(targetDomain);
-    await chrome.storage.sync.set({ whitelist: lines.join('\n') });
+  if (!targetDomain) return { status: 'exists', domain: targetDomain };
+  const blIdx = blLines.indexOf(targetDomain);
+  const alreadyWhitelisted = lines.includes(targetDomain);
+  if (!alreadyWhitelisted || blIdx !== -1) {
+    if (!alreadyWhitelisted) lines.push(targetDomain);
+    const patch = { whitelist: lines.join('\n') };
+    if (blIdx !== -1) {
+      blLines.splice(blIdx, 1);
+      patch.blacklist = blLines.join('\n');
+      blacklistCache.delete(targetDomain);
+    }
+    await chrome.storage.sync.set(patch);
     whitelistCache.set(targetDomain, true);
+    return { status: 'added', domain: targetDomain };
+  }
+  return { status: 'exists', domain: targetDomain };
+}
+
+// v7.2.0: mirror of handleAddWhitelist for the explicit-prohibition list.
+// Internal-channel only: page scripts can never forge a blacklist entry.
+async function handleAddBlacklist(request) {
+  const result = await chrome.storage.sync.get(['whitelist', 'blacklist']);
+  const lines = (result.blacklist || '').split('\n').map((l) => normalizeDomain(l)).filter(Boolean);
+  const wlLines = (result.whitelist || '').split('\n').map((l) => normalizeDomain(l)).filter(Boolean);
+  const targetDomain = normalizeDomain(request.domain);
+  if (!targetDomain) return { status: 'exists', domain: targetDomain };
+  const wlIdx = wlLines.indexOf(targetDomain);
+  const alreadyBlacklisted = lines.includes(targetDomain);
+  if (!alreadyBlacklisted || wlIdx !== -1) {
+    if (!alreadyBlacklisted) lines.push(targetDomain);
+    const patch = { blacklist: lines.join('\n') };
+    if (wlIdx !== -1) {
+      wlLines.splice(wlIdx, 1);
+      patch.whitelist = wlLines.join('\n');
+      whitelistCache.delete(targetDomain);
+    }
+    await chrome.storage.sync.set(patch);
+    blacklistCache.set(targetDomain, true);
     return { status: 'added', domain: targetDomain };
   }
   return { status: 'exists', domain: targetDomain };
@@ -262,6 +346,20 @@ async function handleSetWhitelist(request) {
   return { status: 'saved', count: unique.length };
 }
 
+// v7.2.0: bulk blacklist save. Replaces the blacklist only — a bulk edit must
+// never destroy the other list's user data. Domains present on both lists
+// after independent bulk saves resolve to deny at the gate (blacklist wins).
+async function handleSetBlacklist(request) {
+  const lines = Array.isArray(request.blacklist)
+    ? request.blacklist.map((l) => normalizeDomain(String(l || '').trim())).filter(Boolean)
+    : [];
+  const unique = Array.from(new Set(lines));
+  await chrome.storage.sync.set({ blacklist: unique.join('\n') });
+  blacklistCache.clear();
+  blacklistExpiry = 0;
+  return { status: 'saved', count: unique.length };
+}
+
 async function handleGetLogs() {
   const result = await chrome.storage.local.get(['swBlocks', 'detailedAttempts']);
   return {
@@ -273,6 +371,16 @@ async function handleGetLogs() {
 async function handleResolvePermission(request) {
   const reqId = Number(request.id);
   if (!Number.isFinite(reqId)) return { status: 'invalid_id' };
+  // v7.2.0: optional blacklist grant — the prompt's BLACKLIST button settles
+  // this request as a denial AND permanently blacklists the prompted domain.
+  // Failure of the blacklist write must not swallow the settlement itself.
+  if (request.blacklist === true && request.domain) {
+    try {
+      await handleAddBlacklist({ domain: request.domain });
+    } catch (e) {
+      console.error('[Ψ-Core] prompt blacklist failed:', e);
+    }
+  }
   settleRequest(reqId, request.allowed === true);
   return { status: 'resolved' };
 }
@@ -281,7 +389,8 @@ async function handleGhostStatus(sender) {
   const enabled = await isEnabled();
   const pageOrigin = senderOrigin(sender);
   const whitelisted = pageOrigin ? await isWhitelisted(pageOrigin) : false;
-  return { status: 'ok', active: enabled, whitelisted: whitelisted };
+  const blacklisted = pageOrigin ? await isBlacklisted(pageOrigin) : false;
+  return { status: 'ok', active: enabled, whitelisted: whitelisted, blacklisted: blacklisted };
 }
 
 async function handleSwAttemptLog(request, sender) {
@@ -313,21 +422,32 @@ async function handleRequestPermission(request, sender) {
     return { allowed: false, reason: 'rate_limited' };
   }
 
-  // 2. Master toggle — global pass-through when disabled.
+  const target = resolveUrl(request.url, pageOrigin);
+
+  // 2. Blacklist hard-deny (v7.2.0). An explicit user prohibition is
+  //    absolute: it precedes the master toggle, the DDoS-Guard fast path and
+  //    the whitelist, and survives pass-through mode.
+  const targetBlacklisted = target ? await isBlacklisted(target.href) : false;
+  const originBlacklisted = pageOrigin ? await isBlacklisted(pageOrigin) : false;
+  if (targetBlacklisted || originBlacklisted) {
+    logTelemetry('Gate', request.url, { allowed: false, source: 'blacklist' }, sender);
+    return { allowed: false, reason: 'blacklisted' };
+  }
+
+  // 3. Master toggle — global pass-through when disabled.
   if (!(await isEnabled())) {
     logTelemetry('Gate', request.url, { allowed: true, source: 'toggle-off' }, sender);
     return { allowed: true, reason: 'disabled' };
   }
 
-  // 3. DDoS-Guard fast path (baseline auto-allow, centralized here as well).
+  // 4. DDoS-Guard fast path (baseline auto-allow, centralized here as well).
   if (isDDoSGuardChallenge(request.url)) {
     console.log('[Ψ-Core] Auto-allowing DDoS-Guard challenge:', request.url);
     logTelemetry('Gate', request.url, { allowed: true, source: 'ddos-guard' }, sender);
     return { allowed: true, reason: 'ddos-guard' };
   }
 
-  // 4. Whitelist — auto-allow (the whitelist is finally enforced).
-  const target = resolveUrl(request.url, pageOrigin);
+  // 5. Whitelist — auto-allow (the whitelist is finally enforced).
   const targetWhitelisted = target ? await isWhitelisted(target.href) : false;
   const originWhitelisted = pageOrigin ? await isWhitelisted(pageOrigin) : false;
   if (targetWhitelisted || originWhitelisted) {
@@ -335,7 +455,7 @@ async function handleRequestPermission(request, sender) {
     return { allowed: true, reason: 'whitelisted' };
   }
 
-  // 5. Interactive prompt (deduped, capped, window-tracked).
+  // 6. Interactive prompt (deduped, capped, window-tracked).
   const type = String(request.type || 'Unknown');
   const key = type + '|' + (target ? target.href : String(request.url || '')) + '|' + (pageOrigin || '');
 
@@ -371,7 +491,7 @@ async function handleRequestPermission(request, sender) {
       url: promptUrl,
       type: 'popup',
       width: 380,
-      height: 320,
+      height: 360, // v7.2.0: third button row (BLACKLIST DOMAIN) added
       focused: true
     }, (win) => {
       if (chrome.runtime.lastError || !win) {
@@ -389,9 +509,12 @@ async function handleRequestPermission(request, sender) {
 
 const INTERNAL_ACTIONS = new Set([
   'toggle', 'addWhitelist', 'setWhitelist', 'getLogs', 'resolvePermission',
-  'ghostStatus', 'requestPermission', 'swAttemptLog'
+  'ghostStatus', 'requestPermission', 'swAttemptLog',
+  'addBlacklist', 'setBlacklist'
 ]);
 const EXTERNAL_ACTIONS = new Set(['ghostStatus', 'requestPermission', 'swAttemptLog']);
+// v7.2.0: addBlacklist/setBlacklist stay internal-channel only — a page
+// script must never be able to forge a prohibition or a grant.
 
 async function routeAsync(request, sender, channel) {
   const action = request && request.action;
@@ -406,7 +529,9 @@ async function routeAsync(request, sender, channel) {
   switch (action) {
     case 'toggle':             return handleToggle(request);
     case 'addWhitelist':       return handleAddWhitelist(request);
+    case 'addBlacklist':       return handleAddBlacklist(request);
     case 'setWhitelist':       return handleSetWhitelist(request);
+    case 'setBlacklist':       return handleSetBlacklist(request);
     case 'getLogs':            return handleGetLogs();
     case 'resolvePermission':  return handleResolvePermission(request);
     case 'ghostStatus':        return handleGhostStatus(sender);
@@ -490,6 +615,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
     whitelistCache.clear();
     cacheExpiry = 0;
   }
+  if (changes.blacklist) {
+    blacklistCache.clear();
+    blacklistExpiry = 0;
+  }
   if (changes.enabled) {
     applyIconDebounced(changes.enabled.newValue !== false);
   }
@@ -497,7 +626,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.runtime.onInstalled.addListener(async (details) => {
   try {
-    const sync = await chrome.storage.sync.get(['enabled', 'whitelist']);
+    const sync = await chrome.storage.sync.get(['enabled', 'whitelist', 'blacklist']);
     const local = await chrome.storage.local.get(['whitelist', 'ghostActive']);
     const patch = {};
 
@@ -511,6 +640,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
         .filter(Boolean)
         .join('\n'); // legacy local array -> canonical sync string
     }
+    if (sync.blacklist === undefined) patch.blacklist = ''; // v7.2.0 default
 
     if (Object.keys(patch).length) await chrome.storage.sync.set(patch);
     if (Array.isArray(local.whitelist) || local.ghostActive !== undefined) {
