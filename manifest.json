@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "4ndr0serviceguard",
   "short_name": "4ndr0guard",
-  "version": "7.3.0",
+  "version": "7.4.0",
   "description": "Ghost Protocol v7: stealth SW/WebSocket/SharedWorker firewall — quick authorize/spoof/deny bar, whitelist + spooflist + blacklist.",
   "minimum_chrome_version": "111",
   "permissions": [

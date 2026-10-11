@@ -1,6 +1,6 @@
-# Mitigation Log — v7.0.0 → v7.1.0 → v7.1.1 → v7.2.0 → v7.3.0
+# Mitigation Log — v7.0.0 → v7.1.0 → v7.1.1 → v7.2.0 → v7.3.0 → v7.4.0
 
-Baseline: commit `602c1c4` ("Bumped to version 7.0"). Candidate: v7.3.0
+Baseline: commit `602c1c4` ("Bumped to version 7.0"). Candidate: v7.4.0
 (v7.1.0 = commit `67253b1`, superseded by the field-report hardening below;
 v7.1.1 baseline = commit `104c844` "created helper script for GUP audit";
 v7.2.0 = commit `264fa5b`, the blacklist/completion release — and the baseline
@@ -325,3 +325,53 @@ shape, the deny-cadence phantom (error+close at 40 ms), ghostStatus flags
 (additive), the helper userscript's GM key set (additive sibling for the
 spooflist) and its deferral doctrine — with the policy bridge as the only
 crossing between the two stores, gated by a genuine click.
+
+---
+
+# v7.4.0 — Sandboxed-Frame Resilience (console debrief)
+
+Field report (console debrief, 2026-10-09 12:23): an **uncaught**
+`SecurityError: Failed to read the 'serviceWorker' property from 'Navigator'`
+originating at `4ndr0serviceguard Companion.user.js:255` inside chatgpt.com's
+sandboxed `cdn.platform.openai.com/…/runner.html` iframe (sandbox without
+`allow-same-origin` → opaque origin). The bare capture block read
+`realNav.serviceWorker` (line 255) and would have read `win.caches` (line
+258) the same way: in a sandboxed document those property reads **THROW**, so
+the entire IIFE died at its capture block — no WebSocket gate, no
+SharedWorker gate, no CSP listener, no menus in ANY sandboxed frame, plus the
+uncaught console error. Root cause: privileged-API reads were never
+defensive because ordinary documents never throw on them, and the sandbox
+threat model was never in the test matrix.
+
+## P0 — The crash class
+
+| Gap | Resolution |
+|-----|------------|
+| G-101 Helper userscript died uncaught in sandboxed frames (the exact debrief crash at `:255`) — the WebSocket guard was silently absent exactly where embedders hide their traffic, and the console carried the uncaught error | **safeGet() capture layer**: every privileged read (`navigator`, `navigator.serviceWorker`, `SharedWorker`, `WebSocket`, `caches`) routes through a try/catch accessor that yields `null` on refusal. A sandboxed frame now gets: SW surface skipped (the sandbox itself already forbids SW registration natively — nothing to pacify), WebSocket + SharedWorker gates **fully armed**, default-deny enforced silently. One condensed `console.debug` notice (invisible at the default console filter — stealth doctrine) replaces the uncaught error. |
+| G-102 The extension's Ghost Core (`ghost_core_v7.js`, MAIN world, `all_frames:true`) died in the same class — caught by its top-level interceptor, so it emitted one debug line and silently removed EVERY gate from every sandboxed frame | Same **safeGet() capture layer** in ghost_core_v7.js. In sandboxed frames the externally_connectable stub is absent, so `interrogateGatekeeper` fails safe to `'deny'` — silent default-deny phantom sockets, the doctrine, with zero console noise. `window._4ndr0ghostV7` is now set in sandboxed frames too, so the helper userscript's single-gate deferral doctrine also works there. |
+| G-103 `win.caches` was the second latent crash in the same block (fixing only the serviceWorker read would have moved the crash two lines down) | Covered by the same capture layer; `realCaches === null` simply skips CacheStorage clearing during purge (opaque origins have no CacheStorage — nothing to clear). |
+| G-104 No test coverage for the sandbox threat model — both harnesses stubbed only well-behaved contexts, so the crash class was invisible until the field report | New matrix: userscript **U30–U34** (load survives, WS gate armed, default-deny cadence, pacification via a spooflisted frame host through the opaque-origin page check, utility mode under the extension flag, purge skipped, native SW prohibition NOT masked) and a **NEW ghost-core harness** (G01–G10) executing the real MAIN-world core, including the exact field-report crash class (throwing `serviceWorker`/`caches`/`document.cookie` getters). |
+
+## P2 — Debrief noise classification (ownership)
+
+| Gap | Resolution |
+|-----|------------|
+| G-105 The debrief carried six error families NOT owned by this suite; leaving them unclassified would invite future misdiagnosis | Classified in README ("Console-noise ownership"): (1) `isolatedScriptlets` cookie SecurityErrors — uBlock Origin's own set-cookie scriptlet family failing benignly inside the sandboxed runner iframe (uBO code, not page code, not ours); (2) `runner.html` CSP inline-script refusals — the embedder's runner iframe vs its own CSP; (3) `runner-….js` + `/backend-api/…/ads` `ERR_BLOCKED_BY_CLIENT` — the ad-blocker doing its job on embedder telemetry/ads; (4) `GroupMarkerNotSet` / software-WebGL deprecation — Chromium internals on the embedder's canvas; (5) `Request was blocked by DevTools` — the user's own DevTools request blocking; (6) `Maximize_Any_Media` localStorage warnings — that script's own HANDLED fallback (it boots with defaults immediately after — visible in the debrief itself); recommendation recorded: silence via a sandbox-safe LS read in that script's own future revision. None are defects of this suite; none are fixable from this suite's code. |
+| G-106 Version fragmentation after the v7.3.0 release | Unified bump to **7.4.0**: manifest, README badge, both userscripts, every file header, popup subtitle + version chip, HUD subtitle. |
+
+**Validation:** `node --check` on all JS artifacts; the extended userscript
+harness (full v7.3.0 matrix + U30–U34), the NEW ghost-core harness
+(G01–G10), and the unchanged background harness (112 cases) all green. GUP
+v5.3.1 proof chain re-executed against the v7.3.0 baseline (`60703a7`):
+atomization + SHA-256 unit comparison (0 MISSING), per-unit semantic
+superset verdicts, bidirectional alignment, inventory, and the mandatory
+validation gate. See the GUP evidence bundle.
+
+**Baseline behaviors intentionally preserved (superset verification set,
+v7.3.0 → v7.4.0): the complete v7.3.0 feature set** — three-way action model,
+Quick Bar + prompt-window fallback + promptMode, spooflist/blacklist/
+whitelist gate order, policy bridge, popup CURRENT SITE panel, per-attempt
+buttons, userscript menus/HUD/purge/deferral — with the capture block as the
+only behavioral change surface, and it is strictly additive: ordinary
+documents capture identical references (the `undefined → null` normalization
+is consumed only by guards that already treated both as falsy).

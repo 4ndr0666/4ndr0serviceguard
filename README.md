@@ -2,7 +2,7 @@
   <img src="https://raw.githubusercontent.com/4ndr0666/4ndr0serviceguard/refs/heads/main/icons/4ndr0serviceguard.svg" alt="4ndr0serviceguard Project Banner" width="100%">
 </p>
 
-[![version](https://img.shields.io/badge/version-7.3.0-blue.svg)](https://github.com/4ndr0666/4ndr0serviceguard)
+[![version](https://img.shields.io/badge/version-7.4.0-blue.svg)](https://github.com/4ndr0666/4ndr0serviceguard)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **A dual-purpose Chrome Extension:**
@@ -41,7 +41,8 @@ The **Ghost Protocol** (`ghost_core_v7.js`) is a stealthy, Proxy-based intercept
 ## Features
 
 ### Core Features
-- 🛡️ **Ghost Protocol v7.3**: Stealthy Proxy-based Service Worker nullification (`toString()`-transparent hooks)
+- 🛡️ **Ghost Protocol v7.4**: Stealthy Proxy-based Service Worker nullification (`toString()`-transparent hooks)
+- 🧱 **Sandboxed-Frame Resilience (v7.4.0)**: every privileged capture is defensive — inside sandboxed iframes (opaque origins) where `navigator.serviceWorker`/`caches` reads throw `SecurityError`, the SW surface is skipped (the sandbox already forbids it natively) while the **WebSocket and SharedWorker gates still install** — default-deny holds even in frames the embedder hides, with one condensed debug-level notice instead of an uncaught console error
 - 🧹 **Purge-on-Load**: unregisters pre-existing Service Workers and clears CacheStorage on protected origins
 - ✍️ **Enforced Whitelist**: domain + automatic subdomain support — whitelisted origins get real Service Workers, no prompts
 - ⛔ **Absolute Blacklist**: explicit-prohibition list — hard-denied before the master toggle, the spooflist, the whitelist and the DDoS-Guard fast path; survives pass-through mode; mutually exclusive with the other lists on single-domain adds
@@ -67,7 +68,20 @@ The **Ghost Protocol** (`ghost_core_v7.js`) is a stealthy, Proxy-based intercept
 - **Violentmonkey Companion**: Service-Worker-focused userscript version (`ghost_core_v7.user.js`)
 - **Completed Helper Userscript**: full standalone Ghost Protocol for userscript managers (`userscript/4ndr0tools - 4ndr0serviceguarder.user.js`) — blacklist + whitelist, master toggle, purge-on-load, stealth Proxy hooks, glass status HUD with the Ψ glyph, and automatic deferral to the extension's Gatekeeper when the extension is present
 
-See [MITIGATION_LOG.md](MITIGATION_LOG.md) for the full v7.0 → v7.1 → v7.1.1 → v7.2.0 → v7.3.0 gap-closure record (v7.3.0: quick-decision surface, spooflist, three-way action model, policy bridge, matching fixes).
+See [MITIGATION_LOG.md](MITIGATION_LOG.md) for the full v7.0 → v7.1 → v7.1.1 → v7.2.0 → v7.3.0 → v7.4.0 gap-closure record (v7.3.0: quick-decision surface, spooflist, three-way action model, policy bridge, matching fixes; v7.4.0: sandboxed-frame resilience + console-debrief noise ownership).
+
+### Console-noise ownership (v7.4.0 debrief)
+
+A 2026-10-09 console debrief on a page with a sandboxed runner iframe carried six error families beside the (now fixed) companion crash. Ownership, so future debriefs read clean:
+
+| Console line | Owner | Verdict |
+|---|---|---|
+| `isolatedScriptlets` — `SecurityError … 'cookie' … sandboxed` | uBlock Origin's own `set-cookie`-family scriptlets running inside the sandboxed iframe | uBO-internal, benign — not page code and not this suite; silence by disabling the matching filter, or ignore |
+| `runner.html: Refused to execute inline script … CSP` | The embedder's own runner iframe vs its own CSP | Site-side; unreachable from extension/userscript code |
+| `runner-….js` / `/backend-api/…/ads` — `ERR_BLOCKED_BY_CLIENT` | The ad-blocker blocking the embedder's telemetry/ads scripts | The blocker working as intended |
+| `GroupMarkerNotSet` / software-WebGL deprecation | Chromium internals on the embedder's WebGL canvas | Browser-internal; not fixable from page context |
+| `Request was blocked by DevTools: …/beacons/event` | The user's own DevTools request-blocking setting | Intentional local blocking |
+| `Maximize_Any_Media … settings LS read failed` | That script's own **handled** fallback (it boots with defaults immediately after — visible in the same log) | Not a crash; recommend a sandbox-safe LS read in that script's own future revision |
 
 ---
 
@@ -188,6 +202,7 @@ No build step required. Edit `ghost_core_v7.js`, `popup.js`, or `background.js` 
 
 ## Version History (Relevant)
 
+- **v7.4.0** — Sandboxed-frame resilience (console debrief 2026-10-09: uncaught `SecurityError` at the companion's capture block inside a sandboxed runner iframe): defensive `safeGet()` capture layer in both page-world cores (`ghost_core_v7.js` + helper userscript) so privileged reads that THROW in opaque-origin documents yield null instead of killing the IIFE — SW surface skipped (natively forbidden by the sandbox itself), WebSocket/SharedWorker gates still installed, silent fail-safe default-deny, one condensed debug notice instead of an uncaught error; extension flag now set in sandboxed frames (single-gate deferral works there); new ghost-core behavioral harness + sandbox matrix in the userscript harness; debrief console-noise ownership table (uBO scriptlets, embedder CSP, ad-blocker blocks, Chromium WebGL notices, DevTools blocking, handled third-party LS fallbacks) (see [MITIGATION_LOG.md](MITIGATION_LOG.md))
 - **v7.3.0** — Quick-decision cycle (field report: "blacklisting does not stop the persistent popup on sites I want to spoof by default"): three-way action model (AUTHORIZE / SPOOF / DENY), silent spooflist, in-page Quick Bar (keyboard + countdown + remembered scopes) with the prompt window as fallback, site-scoped remember grants (the endpoint-host grant-scope defect), robust domain normalization (pasted URLs match), query-stripped dedup, popup CURRENT SITE panel + per-attempt SPOOF, decision-surface preference, and the userscript↔extension policy bridge (split-brain fix) (see [MITIGATION_LOG.md](MITIGATION_LOG.md))
 - **v7.2.0** — Blacklist enforcement (absolute-prohibition gate step, mutual-exclusion list management, prompt/popup blacklist controls), completed helper userscript (stealth dual-layer hooks, WS phantom, SharedWorker gate, purge, local lists, 3lectric-Glass HUD, extension deferral), 3lectric-Glass spec alignment across popup/prompt, constructor-fidelity hardening, unified 7.2.0 version bump across every component (see [MITIGATION_LOG.md](MITIGATION_LOG.md))
 - **v7.1.0** — Gap-mitigation release: purge-on-load + cache clearing, enforced whitelist, functional master toggle, working popup/background IPC, restart-safe telemetry, Proxy camouflage, live WebSocket property forwarding, userscript companion, LICENSE, 50-item gap closure (see [MITIGATION_LOG.md](MITIGATION_LOG.md))

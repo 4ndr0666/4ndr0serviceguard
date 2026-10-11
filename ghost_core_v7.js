@@ -1,4 +1,4 @@
-// ghost_core_v7.js — 4ndr0serviceguard Ghost Core v7.3 (MAIN world)
+// ghost_core_v7.js — 4ndr0serviceguard Ghost Core v7.4 (MAIN world)
 //
 // Paradigm (D1): Proxy-based interception facade — single paradigm, no chimera.
 //   navigator.serviceWorker                       → memoized phantom container
@@ -34,6 +34,20 @@
 //   pacifier); SharedWorkers keep the baseline SecurityError for both.
 //   ghostStatus additionally reports the spooflisted flag so a spooflisted
 //   origin stays guarded (and purged) exactly like a blacklisted one.
+// v7.4.0: sandboxed-frame resilience (console debrief 2026-10-09). Content
+//   scripts run with all_frames:true, so this core also executes inside
+//   sandboxed iframes (opaque origins), where reading navigator.serviceWorker
+//   or window.caches THROWS SecurityError — the v7.3 core died inside its
+//   top-level catch there and silently removed every gate from every
+//   sandboxed frame. The capture block now reads privileged properties
+//   defensively (safeGet): a sandboxed frame yields null references, the SW
+//   surface is skipped (the sandbox itself already forbids SW registration
+//   natively — nothing to pacify), while the WebSocket and SharedWorker gates
+//   still install. The externally_connectable stub is absent in opaque-origin
+//   frames, so interrogateGatekeeper fails safe to 'deny' — silent
+//   default-deny phantom sockets, the doctrine, with zero console noise.
+//   window._4ndr0ghostV7 is now set in sandboxed frames too, so the helper
+//   userscript's single-gate deferral doctrine works there as well.
 
 (function () {
   'use strict';
@@ -44,11 +58,32 @@
   window._4ndr0ghostV7 = true;
 
   // === CAPTURED REAL REFERENCES (immune to later page tampering) ===
+  // v7.4.0: privileged reads are defensive — sandboxed documents THROW
+  // SecurityError on these getters (see header). safeGet() yields null on
+  // refusal; the existing !realSW / !realCaches guards then skip exactly the
+  // surfaces the sandbox already forbids natively, while the WebSocket and
+  // SharedWorker gates below still install and enforce fail-safe deny.
+  function safeGet(obj, prop) {
+    try { const v = obj[prop]; return v === undefined ? null : v; }
+    catch (e) { return null; } // sandboxed document / insecure context — fail safe
+  }
+
+  let sandboxedFrame = false;
+  try { void document.cookie; } catch (e) { sandboxedFrame = true; }
+
   const realNav = navigator;
-  const realSW = realNav.serviceWorker || null;   // undefined on insecure origins (article: HTTP guard)
-  const realShared = window.SharedWorker || null;
-  const OrigWebSocket = window.WebSocket || null;
-  const realCaches = window.caches || null;
+  const realSW = safeGet(realNav, 'serviceWorker'); // null on insecure origins AND sandboxed frames
+  const realShared = safeGet(window, 'SharedWorker');
+  const OrigWebSocket = safeGet(window, 'WebSocket');
+  const realCaches = safeGet(window, 'caches');
+
+  if (sandboxedFrame) {
+    // One condensed debug-level notice (invisible at the default console
+    // filter — stealth doctrine) instead of the v7.3 silent core death:
+    // the frame is sandboxed, its SW APIs are natively unavailable, and the
+    // WebSocket gate is armed with fail-safe deny.
+    console.debug('[Ψ-Ghost] sandboxed frame (opaque origin) — SW API natively unavailable; WebSocket gate active, fail-safe deny.');
+  }
 
   // Runtime stub captured at document_start — pages may shadow `chrome` later.
   const extRuntime = (typeof chrome !== 'undefined' && chrome && chrome.runtime &&

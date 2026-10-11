@@ -1,4 +1,4 @@
-// ghost_bridge.js — 4ndr0serviceguard Bootstrap Bridge v7.3 (ISOLATED world)
+// ghost_bridge.js — 4ndr0serviceguard Bootstrap Bridge v7.4 (ISOLATED world)
 //
 // Three responsibilities, in injection order:
 //
@@ -29,6 +29,13 @@
 //      (same isTrusted gate) and only a genuine click writes the real
 //      extension list over the internal channel. Forged request spam is
 //      contained by per-session caps, a show-rate floor and auto-dismiss.
+//
+// v7.4.0: version-unification release (sandboxed-frame resilience landed in
+//      ghost_core_v7.js and the helper userscript). This bridge needed no
+//      behavioral change: content scripts run fine inside sandboxed iframes,
+//      and every API it touches (DOM + chrome.runtime) is available there —
+//      so the Quick Bar and the CONFIRM bar work even in frames whose page
+//      world throws on navigator.serviceWorker reads.
 
 (function () {
   'use strict';

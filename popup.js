@@ -1,4 +1,4 @@
-// popup.js — 4NDR0666 ServiceGuard v7.3.0 (3lectric-Glass Control Surface)
+// popup.js — 4NDR0666 ServiceGuard v7.4.0 (3lectric-Glass Control Surface)
 // Wired to the Ψ-Core router: action-keyed messages, canonical sync storage,
 // live blocked attempts via storage listener + getLogs, one-click site
 // policy (AUTHORIZE / SPOOF / BLOCK / ASK AGAIN), spooflist management,
@@ -12,6 +12,9 @@
 // writes), spooflist textarea (setSpooflist IPC), per-attempt SPOOF buttons,
 // prompt-mode segmented control (inline Quick Bar vs prompt window), and
 // badge rendering for the live site policy.
+// v7.4.0: version-unification release (sandboxed-frame resilience landed in
+// the page-world cores; extension pages are never sandboxed, so this surface
+// is behavior-identical to v7.3.0).
 
 document.addEventListener('DOMContentLoaded', () => {
   const masterToggle = document.getElementById('masterToggle');

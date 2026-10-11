@@ -1,4 +1,4 @@
-// background.js — 4ndr0serviceguard Ψ-Core v7.3.0 (Background Service Worker)
+// background.js — 4ndr0serviceguard Ψ-Core v7.4.0 (Background Service Worker)
 //
 // Unified command & control router. Two channels:
 //   chrome.runtime.onMessage        → internal extension contexts (popup,
@@ -52,6 +52,14 @@
 // service-worker teardown can never leak an unhandled rejection; prompt window
 // removal reads runtime.lastError; per-tab rate/prompt state is evicted on tab
 // close; whitelist adds normalize stored lines before dedup.
+//
+// v7.4.0: sandboxed-frame resilience release — no router logic changed. The
+// gate already fails safe for opaque-origin senders (an origin of "null"
+// matches no list entry, so the gate settles at default-deny), and the
+// sandboxed-frame crash class lived entirely in the two page-world cores
+// (ghost_core_v7.js and the helper userscript), where it is now fixed. This
+// file carries the unified version bump and the debrief-noise classification
+// record (see MITIGATION_LOG.md G-101…G-106).
 
 const CACHE_REFRESH_MS = 30000;
 const DEBOUNCE_MS = 250;          // icon-update batching window (baseline utility, live role)

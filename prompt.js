@@ -1,4 +1,4 @@
-// prompt.js — 4ndr0serviceguard Gatekeeper Prompt v7.3 (3lectric-Glass)
+// prompt.js — 4ndr0serviceguard Gatekeeper Prompt v7.4 (3lectric-Glass)
 // Resolves exactly once per prompt window; closing the window denies.
 //
 // v7.3.0: three-way action model — AUTHORIZE (real connection), SPOOF
