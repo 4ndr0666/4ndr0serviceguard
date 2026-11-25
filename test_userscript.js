@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const SRC = path.join(__dirname, '..', '4ndr0serviceguard', 'userscript', '4ndr0tools - 4ndr0serviceguarder.user.js');
+const SRC = path.join(__dirname, 'userscript', '4ndr0tools - 4ndr0serviceguard Companion.user.js');
 const SOURCE = fs.readFileSync(SRC, 'utf8');
 
 // === Manual deterministic clock ===
@@ -630,7 +630,7 @@ test('U51 denied socket: CONNECTING phantom then error+close at 40ms', async () 
   eq(events.join(','), 'error,close', 'U51b — native-faithful failure cadence');
   eq(ws.readyState, 3, 'U51c');
 });
-test('U52 denied socket: buffered sends during CONNECTING, throw after CLOSED', async () => {
+test('U52 denied socket: buffered sends during CONNECTING, non-throwing no-op after CLOSED', async () => {
   const s = loadUserScript({});
   const ws = new s.win.WebSocket('wss://buf.example/ws');
   ws.send('during-connecting');
@@ -638,7 +638,7 @@ test('U52 denied socket: buffered sends during CONNECTING, throw after CLOSED', 
   await s.clock.advance(50);
   let thrown = null;
   try { ws.send('late'); } catch (e) { thrown = e; }
-  ok(thrown && thrown.name === 'InvalidStateError', 'U52b');
+  eq(thrown, null, 'U52b — non-throwing no-op after CLOSED (WHATWG §3.1)');
 });
 test('U53 page-close during denied handshake: close-only, no error event', async () => {
   const s = loadUserScript({});

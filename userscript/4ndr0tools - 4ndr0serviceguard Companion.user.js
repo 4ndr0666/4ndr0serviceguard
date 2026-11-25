@@ -644,7 +644,7 @@
         sendBuffer.push(data); // native CONNECTING semantics: buffer the frame
         return;
       }
-      throw new win.DOMException('WebSocket is already in CLOSING or CLOSED state.', 'InvalidStateError');
+      // WHATWG WebSockets §3.1: send() in CLOSING (2) or CLOSED (3) is a non-throwing no-op.
     };
 
     phantom.close = function () {

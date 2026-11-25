@@ -11,7 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const SRC = path.join(__dirname, '..', '4ndr0serviceguard', 'background.js');
+const SRC = path.join(__dirname, 'background.js');
 const SOURCE = fs.readFileSync(SRC, 'utf8');
 
 // === Manual deterministic clock ===

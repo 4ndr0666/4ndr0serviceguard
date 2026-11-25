@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const SRC = path.join(__dirname, '..', '4ndr0serviceguard', 'ghost_core_v7.js');
+const SRC = path.join(__dirname, 'ghost_core_v7.js');
 const SOURCE = fs.readFileSync(SRC, 'utf8');
 
 // === Manual deterministic clock ===
@@ -182,7 +182,7 @@ async function main() {
     catch (e) { fail++; console.log('  [FAIL] ' + t.name + ' :: ' + (e && e.message)); }
   }
   console.log('\n[test_ghost_core] ' + pass + '/' + tests.length + ' cases passed' + (fail ? (' — ' + fail + ' FAILED') : ''));
-  process.exitCode = (fail || tests.length !== 30) ? 1 : 0;
+  process.exitCode = (fail || tests.length !== 32) ? 1 : 0;
 }
 
 // =====================================================================
@@ -398,14 +398,14 @@ test('G07a denied socket: error then close at the 40ms cadence', async () => {
   eq(events.join(','), 'error,close', 'G07a2 — error precedes close');
   eq(ws.readyState, 3, 'G07a3');
 });
-test('G07b send after CLOSED throws InvalidStateError', async () => {
+test('G07b send after CLOSED is a non-throwing no-op (WHATWG §3.1)', async () => {
   const core = loadCore({ gateAction: 'deny' });
   const ws = new core.sandbox.WebSocket('wss://deny2.example/ws');
   await core.clock.advance(60);
   let thrown = null;
   try { ws.send('late'); } catch (e) { thrown = e; }
-  ok(thrown, 'G07b — threw');
-  eq(thrown.name, 'InvalidStateError', 'G07b2');
+  eq(thrown, null, 'G07b — must not throw InvalidStateError on CLOSED');
+  eq(ws.readyState, 3, 'G07b2 — remains CLOSED');
 });
 
 // =====================================================================
@@ -429,6 +429,43 @@ test('G08b buffered sends and listeners forward to the real socket', async () =>
   ok(real && real.url === 'wss://real2.example/ws', 'G08b — real created');
   ok(real.sent.includes('during-handshake'), 'G08b2 — buffered send forwarded');
   ok(real.listeners.some((l) => l.type === 'open'), 'G08b3 — listener forwarded');
+});
+test('G08c allowed realWs in CLOSING or CLOSED does not throw InvalidStateError on send()', async () => {
+  const core = loadCore({ gateAction: 'allow' });
+  const ws = new core.sandbox.WebSocket('wss://chatgpt.com/ws');
+  await core.clock.advance(10);
+  const real = FakeNativeWebSocket.constructed[FakeNativeWebSocket.constructed.length - 1];
+  ok(real, 'G08c — realWs constructed');
+  real.readyState = 2; // CLOSING
+  let errClosing = null;
+  try { ws.send('during-closing'); } catch (e) { errClosing = e; }
+  eq(errClosing, null, 'G08c2 — CLOSING send must not throw');
+  real.readyState = 3; // CLOSED
+  let errClosed = null;
+  try { ws.send('after-closed'); } catch (e) { errClosed = e; }
+  eq(errClosed, null, 'G08c3 — CLOSED send must not throw');
+  eq(real.sent.length, 0, 'G08c4 — nothing transmitted while CLOSING/CLOSED');
+});
+test('G08d realWs rejecting CONNECTING send re-queues and flushes on open', async () => {
+  const core = loadCore({ gateAction: 'allow' });
+  const origSend = FakeNativeWebSocket.prototype.send;
+  FakeNativeWebSocket.prototype.send = function (data) {
+    if (this.readyState === 0) throw new FakeDOMException('Still in CONNECTING state.', 'InvalidStateError');
+    this.sent.push(data);
+  };
+  try {
+    const ws = new core.sandbox.WebSocket('wss://strict-browser.example/ws');
+    ws.send('frame-1');
+    await core.clock.advance(10);
+    const real = FakeNativeWebSocket.constructed[FakeNativeWebSocket.constructed.length - 1];
+    eq(real.sent.length, 0, 'G08d — held while CONNECTING');
+    ws.send('frame-2');
+    real.readyState = 1;
+    real.listeners.filter((l) => l.type === 'open').forEach((l) => l.listener(new FakeEvent('open')));
+    eq(real.sent.join(','), 'frame-1,frame-2', 'G08d2 — both pre-allow and mid-connecting frames flushed on open');
+  } finally {
+    FakeNativeWebSocket.prototype.send = origSend;
+  }
 });
 
 // =====================================================================

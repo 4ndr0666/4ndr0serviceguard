@@ -540,7 +540,9 @@
         if (realWs) {
           if (realWs.readyState === 1) realWs.send(data);
           else if (realWs.readyState === 0) sendBuffer.push(data);
-          else throw new DOMException('WebSocket is already in CLOSING or CLOSED state.', 'InvalidStateError');
+          // WHATWG WebSockets §3.1: send() in CLOSING (2) or CLOSED (3) is a
+          // non-throwing no-op — never throw into host pages.
+          return;
         } else if (spoofOpen) {
           // v7.3.0 pacifier: a native OPEN socket accepts sends — we swallow
           // them silently. bufferedAmount stays 0 (a healthy socket) so
@@ -548,9 +550,8 @@
           return;
         } else if (state === 0) {
           sendBuffer.push(data);
-        } else {
-          throw new DOMException('WebSocket is already in CLOSING or CLOSED state.', 'InvalidStateError');
         }
+        // WHATWG WebSockets §3.1: CLOSING (2) or CLOSED (3) is a non-throwing no-op.
       };
 
       phantom.close = function (code, reason) {
@@ -630,8 +631,23 @@
             const fn = pendingOn[name];
             if (typeof fn === 'function') realWs['on' + name] = fn;
           });
-          sendBuffer.forEach((d) => realWs.send(d));
-          sendBuffer = [];
+          const flushSendBuffer = () => {
+            if (!realWs || sendBuffer.length === 0) return;
+            if (realWs.readyState >= 2) { sendBuffer = []; return; }
+            const queued = sendBuffer;
+            sendBuffer = [];
+            for (let i = 0; i < queued.length; i++) {
+              try {
+                realWs.send(queued[i]);
+              } catch (e) {
+                // Real browser WebSocket still in CONNECTING (0): keep remaining frames for 'open'.
+                sendBuffer = queued.slice(i).concat(sendBuffer);
+                return;
+              }
+            }
+          };
+          realWs.addEventListener('open', flushSendBuffer, { once: true });
+          flushSendBuffer();
         } else if (action === 'spoof') {
           // v7.3.0 pacifier: the socket "completes its handshake" at the v7
           // cadence and stays OPEN forever. Nothing is ever sent; close() is
