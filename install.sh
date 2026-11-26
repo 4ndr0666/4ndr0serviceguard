@@ -1,0 +1,294 @@
+#!/usr/bin/env bash
+# File: install.sh
+# Description: Enterprise-grade installer for 4ndr0service Suite.
+#
+# Capabilities:
+#   - Idempotent: safe to run multiple times; detects and migrates prior layouts.
+#   - Atomic:     all filesystem mutations occur inside a POSIX trap so partial
+#                 installs are detected and rolled back on abort or error.
+#   - Dry-run:    full simulation with no writes.
+#   - Uninstall:  complete teardown with lock/symlink cleanup.
+#   - Migration:  detects the old test/src/ layout and moves files to test/.
+#   - Systemd:    deploys and activates the env_maintenance timer automatically.
+#   - Backwards compatible: gracefully handles installations from prior versions.
+
+set -euo pipefail
+IFS=$'\n\t'
+
+SOURCE_DIR="$(cd -- "$(dirname -- "$(readlink -f "${BASH_SOURCE[0]:-$0}")")" && pwd -P)"
+DEFAULT_INSTALL_LOCATION="/opt/4ndr0service"
+BIN_DIR="/usr/local/bin"
+SYMLINK_PATH="${BIN_DIR}/4ndr0service"
+DRY_RUN=false
+UNINSTALL=false
+SKIP_SYSTEMD=false
+_ROLLBACK_NEEDED=false
+_INSTALL_LOCATION=""
+
+log_info()   { printf "\033[1;32m[INFO]\033[0m    %s\n" "$*"; }
+log_warn()   { printf "\033[1;33m[WARN]\033[0m    %s\n" "$*" >&2; }
+log_error()  { printf "\033[1;31m[ERROR]\033[0m   %s\n" "$*" >&2; }
+log_step()   { printf "\033[1;36m[STEP]\033[0m    %s\n" "$*"; }
+log_ok()     { printf "\033[1;32m[OK]\033[0m      %s\n" "$*"; }
+log_dry()    { printf "\033[1;34m[DRY-RUN]\033[0m %s\n" "$*"; }
+
+run() {
+    if [[ "$DRY_RUN" == "true" ]]; then
+        log_dry "Would run: $*"
+        return 0
+    fi
+    "$@"
+}
+
+_rollback() {
+    local exit_code=$?
+    [[ "$DRY_RUN" == "true" ]] && return 0
+    if [[ "$_ROLLBACK_NEEDED" == "true" && $exit_code -ne 0 ]]; then
+        log_error "Install aborted (exit $exit_code). Rolling back..."
+        [[ -L "$SYMLINK_PATH" || -e "$SYMLINK_PATH" ]] && sudo rm -f "$SYMLINK_PATH" 2>/dev/null || true
+        if [[ -n "$_INSTALL_LOCATION" && -d "$_INSTALL_LOCATION" ]]; then
+            if [[ "$_INSTALL_LOCATION" == "$SOURCE_DIR" ]]; then
+                log_warn "Rollback REFUSED: install location equals source directory ($SOURCE_DIR)."
+                log_warn "Nothing was created by this run at that path, so nothing will be removed."
+                trap - EXIT
+                exit "$exit_code"
+            fi
+            case "$_INSTALL_LOCATION" in
+                /opt/*|/home/*|/usr/local/*|/tmp/*)
+                    sudo rm -rf "$_INSTALL_LOCATION" 2>/dev/null || true
+                    log_warn "Removed partial installation at $_INSTALL_LOCATION"
+                    ;;
+                *)
+                    log_error "Rollback REFUSED: '$_INSTALL_LOCATION' is outside safe prefixes (/opt, /home, /usr/local, /tmp)."
+                    log_error "Remove manually: sudo rm -rf '$_INSTALL_LOCATION'"
+                    ;;
+            esac
+        fi
+    fi
+}
+trap '_rollback' EXIT
+
+normalize_path() {
+    local p="$1"
+    [[ "$p" == "~"* ]] && p="${HOME}${p#~}"
+    [[ "$p" != /* ]]   && p="$(pwd -P)/$p"
+    p="$(readlink -f "$p" 2>/dev/null || printf '%s' "$p")"
+    printf '%s' "${p%/}"
+}
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") [OPTIONS]
+
+Options:
+  -n, --dry-run       Simulate all actions; no filesystem changes made.
+  -u, --uninstall     Full teardown: remove install dir, symlink, and lock files.
+  --skip-systemd      Skip systemd unit deployment and activation.
+  -h, --help          Show this help.
+
+Examples:
+  sudo $(basename "$0")               # Standard install to /opt/4ndr0service
+  sudo $(basename "$0") -n            # Dry-run simulation
+  sudo $(basename "$0") -u            # Uninstall
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n|--dry-run) DRY_RUN=true; shift ;;
+        -u|--uninstall) UNINSTALL=true; shift ;;
+        --skip-systemd) SKIP_SYSTEMD=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        *) log_error "Unknown option: $1"; usage; exit 1 ;;
+    esac
+done
+
+if [[ "$UNINSTALL" == "true" ]]; then
+    log_step "Initiating Scorch Protocol..."
+    [[ -L "$SYMLINK_PATH" || -e "$SYMLINK_PATH" ]] && run sudo rm -f "$SYMLINK_PATH"
+    [[ -d "$DEFAULT_INSTALL_LOCATION" ]] && run sudo rm -rf "$DEFAULT_INSTALL_LOCATION"
+    run sudo rm -f /tmp/4ndr0service_*.lock
+    if [[ -f /etc/audit/rules.d/4ndr0service.rules ]]; then
+        run sudo rm -f /etc/audit/rules.d/4ndr0service.rules
+        if command -v augenrules &>/dev/null; then
+            run sudo augenrules --load 2>/dev/null || true
+        elif command -v auditctl &>/dev/null; then
+            run sudo auditctl -D 2>/dev/null || true
+        fi
+        log_ok "Removed auditd rules."
+    fi
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        _real_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+    else
+        _real_home="$HOME"
+    fi
+    local_systemd="${XDG_CONFIG_HOME:-${_real_home}/.config}/systemd/user"
+    for unit in env_maintenance.service env_maintenance.timer; do
+        if [[ -f "$local_systemd/$unit" ]]; then
+            run systemctl --user disable --now "${unit%.service}" 2>/dev/null || true
+            run rm -f "$local_systemd/$unit"
+        fi
+    done
+    run systemctl --user daemon-reload 2>/dev/null || true
+    log_ok "Teardown complete. Zero traces remain."
+    exit 0
+fi
+
+if [[ "$DRY_RUN" == "false" ]]; then
+    printf "\033[1;36m[PROMPT]\033[0m Install location [default: %s]: " "$DEFAULT_INSTALL_LOCATION"
+    read -r _USER_INPUT
+else
+    _USER_INPUT=""
+fi
+INSTALL_LOCATION="$(normalize_path "${_USER_INPUT:-$DEFAULT_INSTALL_LOCATION}")"
+_INSTALL_LOCATION="$INSTALL_LOCATION"
+
+log_step "Source:  $SOURCE_DIR"
+log_step "Target:  $INSTALL_LOCATION"
+[[ "$DRY_RUN" == "true" ]] && log_info "DRY-RUN mode active — no changes will be made."
+
+_migrate_old_tree() {
+    local dest="$1"
+    local old_src_dir="$dest/test/src"
+    local old_verify="$old_src_dir/verify_environment.sh"
+    local old_install="$old_src_dir/install_env_maintenance.sh"
+    local new_test_dir="$dest/test"
+    if [[ -d "$old_src_dir" ]]; then
+        log_step "Detected legacy test/src/ layout — migrating to flat test/ layout..."
+        if [[ -f "$old_verify" && ! -f "$new_test_dir/verify_environment.sh" ]]; then
+            run sudo mv "$old_verify" "$new_test_dir/verify_environment.sh"
+            log_info "Migrated: test/src/verify_environment.sh → test/verify_environment.sh"
+        fi
+        if [[ -f "$old_install" ]]; then
+            run sudo rm -f "$old_install"
+            log_info "Removed stale: test/src/install_env_maintenance.sh (now at systemd/)"
+        fi
+        local _remaining
+        _remaining=$(find "$old_src_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l || echo "0")
+        if [[ "${_remaining:-0}" -gt 0 ]]; then
+            log_warn "test/src/ still contains files after migration; leaving in place."
+        else
+            run sudo rmdir "$old_src_dir" 2>/dev/null || true
+            log_info "Removed empty directory: test/src/"
+        fi
+    fi
+    local bats_dir="$dest/test/bats"
+    if [[ -d "$bats_dir" ]]; then
+        local _bats_count
+        _bats_count=$(find "$bats_dir" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l || echo "0")
+        if [[ "${_bats_count:-0}" -eq 0 ]]; then
+            run sudo rmdir "$bats_dir" 2>/dev/null || true
+            log_info "Removed empty directory: test/bats/"
+        fi
+    fi
+}
+
+if [[ "$SOURCE_DIR" != "$INSTALL_LOCATION" ]]; then
+    log_step "Synchronising source tree to $INSTALL_LOCATION..."
+    PARENT_DIR="$(dirname "$INSTALL_LOCATION")"
+    [[ -d "$PARENT_DIR" ]] || run sudo mkdir -p "$PARENT_DIR"
+    [[ -d "$INSTALL_LOCATION" ]] || run sudo mkdir -p "$INSTALL_LOCATION"
+    if [[ -d "$INSTALL_LOCATION" && "$DRY_RUN" == "false" ]]; then
+        _migrate_old_tree "$INSTALL_LOCATION"
+    fi
+    _ROLLBACK_NEEDED=true
+    if command -v rsync &>/dev/null; then
+        run sudo rsync -av --delete --progress \
+            --exclude '.git/' --exclude '__pycache__/' --exclude '*.bak' --exclude '*~' \
+            --exclude '.gemini/' --exclude '.github/' \
+            "${SOURCE_DIR}/" "${INSTALL_LOCATION}/"
+    else
+        log_warn "rsync not found — falling back to cp (mirror via wipe-then-copy)."
+        if [[ "$DRY_RUN" == "false" ]]; then
+            sudo find "$INSTALL_LOCATION" -mindepth 1 -delete
+        fi
+        run sudo cp -r "${SOURCE_DIR}/"* "${INSTALL_LOCATION}/"
+    fi
+else
+    log_info "Source and target are the same directory. Skipping file sync."
+    [[ "$DRY_RUN" == "false" ]] && _migrate_old_tree "$INSTALL_LOCATION"
+    _ROLLBACK_NEEDED=true
+fi
+
+log_step "Setting execute permissions on all .sh payloads..."
+run sudo find "$INSTALL_LOCATION" -type f -name "*.sh" -exec chmod +x {} +
+
+log_step "Establishing invocation symlink: $SYMLINK_PATH → $INSTALL_LOCATION/main.sh"
+[[ -d "$BIN_DIR" ]] || run sudo mkdir -p "$BIN_DIR"
+[[ -L "$SYMLINK_PATH" || -e "$SYMLINK_PATH" ]] && run sudo rm -f "$SYMLINK_PATH"
+run sudo ln -s "$INSTALL_LOCATION/main.sh" "$SYMLINK_PATH" \
+    || { log_error "Failed to create required invocation symlink: $SYMLINK_PATH"; exit 1; }
+
+log_step "Verifying runtime dependencies..."
+if ! command -v jq &>/dev/null; then
+    log_warn "jq not found — required for JSON config parsing."
+    if command -v pacman &>/dev/null; then
+        if ! run sudo pacman -S --noconfirm --needed jq; then
+            log_error "Automatic jq installation failed."
+            exit 1
+        fi
+    else
+        log_error "Install jq manually before using the suite."
+        exit 1
+    fi
+else
+    log_ok "jq: $(jq --version)"
+fi
+
+if [[ "$SKIP_SYSTEMD" == "false" ]]; then
+    log_step "Deploying systemd maintenance units..."
+    _systemd_installer="$INSTALL_LOCATION/systemd/install_env_maintenance.sh"
+    if [[ -x "$_systemd_installer" ]]; then
+        if systemctl --user status &>/dev/null 2>&1 || systemctl --user list-units &>/dev/null 2>&1; then
+            if [[ "$DRY_RUN" == "false" ]]; then
+                if [[ "${SUDO_USER:-}" != "" ]]; then
+                    _inst_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+                    sudo -u "$SUDO_USER" HOME="$_inst_home" bash "$_systemd_installer" \
+                        || { log_error "systemd maintenance timer activation failed: $_systemd_installer"; exit 1; }
+                else
+                    bash "$_systemd_installer" \
+                        || { log_error "systemd maintenance timer activation failed: $_systemd_installer"; exit 1; }
+                fi
+            else
+                log_dry "Would run: bash $_systemd_installer"
+            fi
+        else
+            log_warn "Systemd user session not available. Run '$_systemd_installer' manually after login."
+        fi
+    else
+        log_warn "systemd/install_env_maintenance.sh not found or not executable at $_systemd_installer"
+        log_warn "Run it manually to activate the maintenance timer."
+    fi
+else
+    log_info "Skipping systemd deployment (--skip-systemd)."
+fi
+
+log_step "Running post-install verification (--report)..."
+if [[ "$DRY_RUN" == "false" ]]; then
+    if [[ -n "${SUDO_USER:-}" ]]; then
+        _sudo_home="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+        sudo -u "$SUDO_USER" HOME="$_sudo_home" \
+            "$INSTALL_LOCATION/main.sh" --report \
+            || { log_error "--report verification failed; installation aborted."; exit 1; }
+    else
+        "$INSTALL_LOCATION/main.sh" --report \
+            || { log_error "--report verification failed; installation aborted."; exit 1; }
+    fi
+else
+    _dry_user="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || printf 'unknown')}}"
+    log_dry "Would run: HOME=~${_dry_user} sudo -u ${_dry_user} $INSTALL_LOCATION/main.sh --report"
+fi
+
+_ROLLBACK_NEEDED=false
+log_ok "Deployment complete. 4ndr0service is installed at $INSTALL_LOCATION"
+# GAP-D FIX: this was previously the final statement written as
+# `[[ "$DRY_RUN" == "false" ]] && log_info ...`. When the test failed (i.e.
+# under --dry-run) the whole AND-OR list — and therefore the script — exited 1
+# with no diagnostic, breaking scripted/CI use of `install.sh -n`. Explicit
+# branch plus a guaranteed success exit for the completed-install path.
+if [[ "$DRY_RUN" == "false" ]]; then
+    log_info "Invoke with: 4ndr0service  (ensure $BIN_DIR is in PATH)"
+else
+    log_dry "Dry-run complete. No filesystem changes were made."
+fi
+exit 0

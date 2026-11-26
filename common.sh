@@ -1,0 +1,478 @@
+#!/usr/bin/env bash
+# File: common.sh
+# Description: Core library for 4ndr0service Suite.
+#   - Centralizes logging, error handling, and path management.
+#   - Provides unified package management and configuration logic.
+#   - Source of truth for XDG compliance.
+
+set -euo pipefail
+
+IFS=$'\n\t'
+
+if [[ -n "${COMMON_SOURCED:-}" ]]; then
+    return 0
+fi
+COMMON_SOURCED=1
+
+# =============================================================================
+# 0. SUITE IDENTITY (v1.5.1 path-architecture remediation)
+# =============================================================================
+# Single source of truth for the suite version. Every component banner
+# (main.sh --version, ascension.sh / purge_matrix.sh usage lines) references
+# this constant so the suite can never again ship mismatched version strings
+# (the baseline shipped "Ascension Protocol v8.3" in its header against
+# "v8.4" in its own usage output).
+export SUITE_VERSION="1.5.1"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# [4NDR0666OS] AUTONOMIC MUTEX LOCK (USER-SCOPED)
+# Placed INSIDE the COMMON_SOURCED guard so that chained source() calls within
+# a single process (controller → service → common) do not re-evaluate the lock.
+# Uses flock --wait (bounded timeout) instead of flock -n (instant abort) so
+# that systemd oneshot services do not permanently fail if a prior run is still
+# flushing its FD. The 10s window covers normal service completion time.
+# ──────────────────────────────────────────────────────────────────────────────
+if [[ -z "${_4NDR0_MUTEX_LOCKED:-}" ]]; then
+    _LOCK_FILE="/tmp/4ndr0service_${EUID:-$(id -u)}.lock"
+
+    if [[ -e "$_LOCK_FILE" && ! -w "$_LOCK_FILE" ]]; then
+        echo -e "\033[38;5;196m[FATAL] Lockfile $_LOCK_FILE is owned by another user. Execute 'sudo rm $_LOCK_FILE' to clear.\033[0m" >&2
+        exit 1
+    fi
+
+    exec 200>"$_LOCK_FILE"
+    # --wait 10: block up to 10s for the lock — safe for systemd oneshot context
+    if ! flock --wait 10 200; then
+        echo -e "\033[38;5;208m[WARN] Could not acquire mutex lock after 10s (UID ${EUID:-$(id -u)}). Aborting.\033[0m" >&2
+        exit 1
+    fi
+    export _4NDR0_MUTEX_LOCKED=1
+fi
+# =============================================================================
+# 1. ANSI COLORS
+# FIX: The original file exported these variables then immediately re-declared
+#      them with `declare -r`.  Under `set -euo pipefail`, re-declaring an
+#      already-exported variable as readonly raises a fatal error.  Single
+#      authoritative `export` block; no `declare -r` anywhere in this file.
+# =============================================================================
+
+export C_RED='\033[0;31m'
+export C_GREEN='\033[0;32m'
+export C_YELLOW='\033[1;33m'
+export C_BLUE='\033[0;34m'
+export C_RESET='\033[0m'
+
+# =============================================================================
+# 2. XDG BASE DIRECTORY SPECIFICATION  (single authoritative block)
+# FIX: Original had two separate export blocks for XDG vars (Sections 2 & 4)
+#      which created redundancy and a maintenance hazard.  Unified here.
+# =============================================================================
+
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+export XDG_STATE_HOME="${XDG_STATE_HOME:-$HOME/.local/state}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_BIN_HOME="${XDG_BIN_HOME:-$HOME/.local/bin}"
+
+# Offensive Suite Paths (Derived from XDG)
+export PYENV_ROOT="${XDG_DATA_HOME}/pyenv"
+export VENV_HOME="${XDG_DATA_HOME}/virtualenv"
+export BIN_DIR="${HOME}/.local/bin"
+
+# Cohesion Variables (Aligning with config.json constraints)
+export PIPX_HOME="${PIPX_HOME:-$XDG_DATA_HOME/pipx}"
+export PIPX_BIN_DIR="${PIPX_BIN_DIR:-$HOME/.local/bin}"
+export NVM_DIR="${NVM_DIR:-$XDG_DATA_HOME/nvm}"
+export PSQL_HOME="${PSQL_HOME:-$XDG_DATA_HOME/psql}"
+export MYSQL_HOME="${MYSQL_HOME:-$XDG_DATA_HOME/mysql}"
+
+# Application Config & Log Paths
+export CONFIG_FILE="${XDG_CONFIG_HOME}/4ndr0service/config.json"
+export LOG_FILE="${XDG_CACHE_HOME}/4ndr0service/service.log"
+
+# =============================================================================
+# 3. PKG_PATH DISCOVERY
+# =============================================================================
+
+ensure_pkg_path() {
+    # v1.5.1 NOTE: every suite file now carries the canonical suite-root
+    # bootstrap (honor a valid inherited PKG_PATH when sourced; sentinel-checked
+    # self-resolution when executed), so this function only activates when
+    # common.sh itself is sourced directly (interactive debugging) with no
+    # prior resolution. The walker remains intentionally shallow (3 levels up)
+    # and, since v1.5.1, every candidate must carry the 4ndr0service sentinel —
+    # an unrelated common.sh in a parent directory can no longer be adopted.
+    if [[ -z "${PKG_PATH:-}" || ! -f "${PKG_PATH:-}/common.sh" ]]; then
+        local caller="${BASH_SOURCE[0]:-$0}"
+        local script_dir
+        script_dir="$(cd -- "$(dirname -- "$(readlink -f "$caller")")" && pwd -P)"
+
+        local count=0
+        while [[ "$script_dir" != "/" && $count -lt 3 ]]; do
+            if [[ -f "$script_dir/common.sh" ]] && [[ "$(<"$script_dir/common.sh")" == *4ndr0service* ]]; then
+                PKG_PATH="$script_dir"
+                break
+            fi
+            script_dir="$(dirname "$script_dir")"
+            ((count++))
+        done
+
+        if [[ -z "${PKG_PATH:-}" ]]; then
+            printf "CRITICAL ERROR: Could not determine package base path.\n" >&2
+            exit 1
+        fi
+    fi
+    export PKG_PATH
+}
+
+ensure_pkg_path
+
+# =============================================================================
+# 4. LOGGING & ERROR HANDLING
+# =============================================================================
+# GAP-E FIX: LOG_FILE was declared (and its directory created by
+# ensure_xdg_dirs) but no log_* function ever wrote to it — main.sh --test
+# cat'ed a file that never existed and the documented "structured logs for
+# testing" contract was unfulfilled. Every log_* emitter now tees one
+# ANSI-free line into $LOG_FILE in addition to its byte-identical stdout/stderr
+# output. The file sink can NEVER fail a caller: append errors (missing parent
+# dir, full disk, read-only mount) are swallowed at the failure site, and
+# single-line appends through '>>' are O_APPEND-atomic for line-sized writes,
+# safe under the suite's flock serialization.
+
+_log_file_write() {
+    # $1 = timestamp, $2 = level tag, $3 = message (already IFS-joined).
+    # Fast path: one O_APPEND printf, zero forks. On first-write failure
+    # (standalone entry points like ascension.sh / purge_matrix.sh executed
+    # directly bypass initialize_suite, so the log dir may not exist yet),
+    # bootstrap the directory once per process and retry; afterwards degrade
+    # silently so the sink can never fail a caller.
+    if ! { printf '%s [%s] %s\n' "$1" "$2" "$3" >>"$LOG_FILE"; } 2>/dev/null; then
+        if [[ -z "${_LOG_DIR_BOOTSTRAPPED:-}" ]]; then
+            _LOG_DIR_BOOTSTRAPPED=1
+            mkdir -p -- "$(dirname -- "$LOG_FILE")" 2>/dev/null || true
+            { printf '%s [%s] %s\n' "$1" "$2" "$3" >>"$LOG_FILE"; } 2>/dev/null || true
+        fi
+    fi
+    return 0
+}
+
+log_info() {
+    local ts
+    ts="$(date +'%H:%M:%S')"
+    printf "${C_BLUE}[INFO]${C_RESET} %s %s\n" "$ts" "$*"
+    _log_file_write "$ts" "INFO" "$*"
+}
+
+log_success() {
+    local ts
+    ts="$(date +'%H:%M:%S')"
+    printf "${C_GREEN}[OK]${C_RESET}   %s %s\n" "$ts" "$*"
+    _log_file_write "$ts" "OK" "$*"
+}
+
+log_warn() {
+    local ts
+    ts="$(date +'%H:%M:%S')"
+    printf "${C_YELLOW}[WARN]${C_RESET} %s %s\n" "$ts" "$*" >&2
+    _log_file_write "$ts" "WARN" "$*"
+}
+
+log_error() {
+    local ts
+    ts="$(date +'%H:%M:%S')"
+    printf "${C_RED}[FAIL]${C_RESET} %s %s\n" "$ts" "$*" >&2
+    _log_file_write "$ts" "FAIL" "$*"
+}
+
+pipx_package_is_installed() {
+    local package="${1:-}"
+    local inventory
+
+    if [[ -z "$package" ]]; then
+        log_error "pipx_package_is_installed requires a package name."
+        return 2
+    fi
+
+    # A failed inventory query is not evidence that the package is absent.
+    # Return 2 to distinguish an operational failure from a normal miss (1).
+    if ! inventory="$(pipx list --short 2>/dev/null)"; then
+        log_error "pipx inventory query failed; refusing to assume '$package' is absent."
+        return 2
+    fi
+
+    awk -v package="$package" '$1 == package { found=1 } END { exit !found }' <<< "$inventory"
+}
+
+handle_error() {
+    local exit_code="${3:-$?}"
+    local line_no="$1"
+    local command="$2"
+    (( exit_code == 0 )) && exit_code=1
+    log_error "Command '$command' failed at line $line_no with exit code $exit_code."
+    # D-08 FIX: Services can set _ALLOW_ERRORS=1 to make handle_error recoverable
+    # (log and return) rather than fatal (exit). Default behavior (exit) is
+    # preserved for all callers that do not set the flag — no breaking change.
+    if [[ "${_ALLOW_ERRORS:-0}" == "1" ]]; then
+        return "$exit_code"
+    fi
+    exit "$exit_code"
+}
+
+trap 'handle_error $LINENO "$BASH_COMMAND" $?' ERR
+
+# =============================================================================
+# 5. FILESYSTEM UTILITIES
+# =============================================================================
+
+ensure_dir() {
+    local dir="${1:-}"
+    [[ -z "$dir" ]] && return 0
+    if [[ ! -d "$dir" ]]; then
+        mkdir -p "$dir"
+        log_info "Created directory: $dir"
+    fi
+}
+
+ensure_xdg_dirs() {
+    ensure_dir "$XDG_CONFIG_HOME"
+    ensure_dir "$XDG_DATA_HOME"
+    ensure_dir "$XDG_STATE_HOME"
+    ensure_dir "$XDG_BIN_HOME"
+    ensure_dir "$(dirname "$LOG_FILE")"
+}
+
+# =============================================================================
+# 6. PACKAGE MANAGEMENT
+# FIX: pkg_is_installed() logic was inverted. Original:
+#        `[[ -z "$pkg" ]] && pacman -Qi "$pkg" &>/dev/null`
+#      This called pacman when $pkg was EMPTY (guaranteed failure) and silently
+#      returned exit-0 ("installed") for every non-empty value without querying
+#      pacman at all, meaning install_sys_pkg() never installed anything.
+#      Corrected: guard returns 1 on empty input, then pacman is queried.
+# =============================================================================
+
+detect_pkg_manager() { echo "pacman"; }
+
+pkg_is_installed() {
+    local pkg="${1:-}"
+    [[ -z "$pkg" ]] && return 1
+    pacman -Qi "$pkg" &>/dev/null
+}
+
+install_sys_pkg() {
+    local pkg="$1"
+    if pkg_is_installed "$pkg"; then
+        log_info "$pkg is already installed."
+        return 0
+    fi
+    # Serialize pacman access — multiple parallel services may call this.
+    # Wait up to 60s for any existing pacman transaction to complete.
+    local lock_wait=0
+    while [[ -f /var/lib/pacman/db.lck ]] && (( lock_wait < 60 )); do
+        log_info "Waiting for pacman lock... (${lock_wait}s elapsed)"
+        sleep 5
+        (( lock_wait += 5 ))
+    done
+    if [[ -f /var/lib/pacman/db.lck ]]; then
+        log_error "pacman lock persists after 60s. Cannot install $pkg. Remove /var/lib/pacman/db.lck if stale."
+        return 1
+    fi
+    # Detect privilege level — avoid sudo when already root
+    local -a pacman_cmd=(pacman -S --noconfirm --needed "$pkg")
+    if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+        pacman_cmd=(sudo "${pacman_cmd[@]}")
+    fi
+    log_info "Deploying $pkg via Pacman..."
+    # GUP 4.2: hard ceiling on the pacman transaction itself — the 60s lock
+    # wait above bounds contention, this bounds the install (large packages on
+    # slow links can otherwise stall a systemd oneshot indefinitely).
+    run_bounded 600 "pacman deploy $pkg" "${pacman_cmd[@]}"
+}
+
+# =============================================================================
+# 7. CONFIGURATION MANAGEMENT
+# =============================================================================
+
+create_config_if_missing() {
+    ensure_dir "$(dirname "$CONFIG_FILE")"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        # Discover the real python version rather than hardcoding a stale value.
+        # Priority: pyenv global → system python3 → safe fallback.
+        local detected_py_ver=""
+        if command -v pyenv &>/dev/null; then
+            local _pv
+            _pv=$(pyenv global 2>/dev/null | head -1)
+            [[ -n "$_pv" && "$_pv" != "system" ]] && detected_py_ver="$_pv"
+        fi
+        if [[ -z "$detected_py_ver" ]] && command -v python3 &>/dev/null; then
+            detected_py_ver=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')" 2>/dev/null || true)
+        fi
+        if [[ -z "$detected_py_ver" ]]; then
+            log_warn "create_config_if_missing: cannot detect Python version — config.json will omit python_version"
+            detected_py_ver="unknown"
+        fi
+
+        cat >"$CONFIG_FILE" <<ENDOFCONFIG
+{
+  "settings_editor": "vim",
+  "python_version": "$detected_py_ver",
+  "required_env": ["PYENV_ROOT", "PIPX_HOME", "PIPX_BIN_DIR", "NVM_DIR", "PSQL_HOME", "MYSQL_HOME"],
+  "directory_vars": ["PYENV_ROOT", "PIPX_HOME", "PIPX_BIN_DIR", "NVM_DIR", "PSQL_HOME", "MYSQL_HOME"],
+  "tools": ["python", "pipx", "pyenv", "poetry"],
+  "python_tools": ["black", "flake8", "mypy", "pytest", "poetry"],
+  "cargo_tools": ["cargo-update", "cargo-audit"],
+  "electron_tools": ["electron-builder"],
+  "go_tools": ["golang.org/x/tools/gopls@latest", "github.com/golangci/golangci-lint/cmd/golangci-lint@latest"],
+  "node_version": "lts/*",
+  "npm_global_packages": ["npm", "yarn", "pnpm", "typescript", "eslint", "prettier"],
+  "ruby_gems": ["bundler", "rake", "rubocop"],
+  "venv_pipx_packages": ["black", "flake8", "mypy", "pytest"],
+  "audit_keywords": ["config_watch", "data_watch", "cache_watch"],
+  "offensive_hives": []
+}
+ENDOFCONFIG
+        log_success "Created default config at $CONFIG_FILE (python_version: $detected_py_ver)"
+    fi
+}
+
+load_config() {
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        create_config_if_missing
+    fi
+    if ! command -v jq &>/dev/null; then
+        install_sys_pkg "jq"
+    fi
+    if ! jq -e . >/dev/null 2>&1 <"$CONFIG_FILE"; then
+        log_error "Config file corrupt: $CONFIG_FILE"
+        exit 1
+    fi
+}
+
+# =============================================================================
+# 8. SHELL CONFIG UTILS
+# =============================================================================
+
+ensure_config_line() {
+    local file="$1"
+    local line="$2"
+    [[ ! -f "$file" ]] && touch "$file"
+    if ! grep -Fxq "$line" "$file"; then
+        printf "%s\n" "$line" >>"$file"
+        log_success "Added config to $file"
+    fi
+}
+
+path_prepend() {
+    local dir="$1"
+    if [[ -d "${dir}" ]] && [[ ":$PATH:" != *":${dir}:"* ]]; then
+        export PATH="${dir}${PATH:+:$PATH}"
+        log_info "Prepended to PATH: ${dir}"
+    fi
+}
+
+# =============================================================================
+# 8.5 BOUNDED EAFP EXECUTION
+# =============================================================================
+# Central execution boundary for external commands. Callers supply the timeout
+# budget explicitly so policy remains visible at each call site while timeout
+# mechanics, diagnostics, and exit-status propagation remain centralized.
+#
+# Usage:
+#   run_bounded <seconds> <label> <command> [args...]
+#
+# The command is executed directly (EAFP). A timeout returns the same non-zero
+# failure path as any other command; callers must not append `|| true` to this
+# primitive when failure is operationally significant.
+# =============================================================================
+run_bounded() {
+    local seconds="$1"
+    local label="$2"
+    shift 2
+
+    [[ "$seconds" =~ ^[1-9][0-9]*$ ]] || {
+        log_error "run_bounded: invalid timeout '$seconds' for $label"
+        return 2
+    }
+    (($# > 0)) || {
+        log_error "run_bounded: missing command for $label"
+        return 2
+    }
+
+    log_info "Executing $label (timeout: ${seconds}s)..."
+    local status=0
+    if timeout --signal=TERM --kill-after=10s -- "$seconds" "$@"; then
+        status=0
+    else
+        status=$?
+    fi
+
+    if (( status == 0 )); then
+        return 0
+    fi
+
+    if (( status == 124 || status == 137 )); then
+        log_error "$label timed out after ${seconds}s."
+    else
+        log_error "$label failed with exit code $status."
+    fi
+    return "$status"
+}
+
+# Execute multiple functions in parallel and wait for all to complete.
+# Returns 1 if any worker failed; 0 if all succeeded.
+run_parallel_checks() {
+    local funcs=("$@")
+    local pids=()
+    local status=0
+
+    for f in "${funcs[@]}"; do
+        if declare -f "$f" >/dev/null; then
+            "$f" &
+            pids+=($!)
+        else
+            log_error "Function $f not found for parallel run."
+            status=1
+        fi
+    done
+
+    if ((${#pids[@]} == 0)); then
+        log_error "No valid functions supplied for parallel run."
+        return 1
+    fi
+
+    for pid in "${pids[@]}"; do
+        if ! wait "$pid"; then
+            status=1
+        fi
+    done
+
+    return "$status"
+}
+
+# =============================================================================
+# 9. SUITE INITIALIZATION
+# =============================================================================
+
+_rotate_log_if_large() {
+    # Bound LOG_FILE growth: rotate to a single .1 generation past 512 KiB.
+    # One previous generation is sufficient at the systemd timer's daily
+    # cadence; stat failures (missing file) degrade to size 0 = no rotation.
+    local -i size=0
+    size="$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)"
+    if (( size > 524288 )); then
+        mv -f "$LOG_FILE" "${LOG_FILE}.1" 2>/dev/null || true
+    fi
+}
+
+initialize_suite() {
+    ensure_xdg_dirs
+    _rotate_log_if_large
+    path_prepend "${XDG_BIN_HOME}"
+    load_config
+    log_success "4ndr0service initialized."
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    initialize_suite
+fi
